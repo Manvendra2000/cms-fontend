@@ -14,7 +14,7 @@ const MOCK_BOOKS_LIST = [
   'ईशावास्योपनिषद्भाष्यम्', 'केनोपनिषत्पदभाष्यम्', 'केनोपनिषद्वाक्यभाष्यम्',
   'कठोपनिषद्भाष्यम्', 'प्रश्नोपनिषद्भाष्यम्', 'मुण्डकोपनिषद्भाष्यम्',
   'माण्डूक्योपनिषद्भाष्यम्', 'तैत्तिरीयोपनिषद्भाष्यम्', 'ऐतरेयोपनिषद्भाष्यम्',
-  'छान्दोग्योपनिषद्भाष्यम्', 'बृहदारण्यकोपनिषद्भाष्यम्', 'श्रीमद्भगवद्गीताभाष्यम्', 'ब्रह्मसूत्रभाष्यम्', 'श्रीमद्भगवद गीता'
+  'छान्दोग्योपनिषद्भाष्यम्', 'बृहदारण्यकोपनिषद्भाष्यम्', 'श्रीमद्भगवद्गीताभाष्यम्', 'ब्रह्मसूत्रभाष्यम्'
 ];
 
 const TEEKAS_BY_BOOK = {
@@ -42,6 +42,8 @@ const INITIAL_FORM_STATE = {
   bhashyaContent: { sanskrit: '', english: '', others: [] },
   teekas: []
 };
+
+// --- UI COMPONENTS ---
 
 const SelectWithAdd = ({ label, options, value, onChange, placeholder = "Select...", disabled = false }) => {
   const [isAdding, setIsAdding] = useState(false);
@@ -76,7 +78,6 @@ export default function App() {
   const [notification, setNotification] = useState(null);
   const [versesQueue, setVersesQueue] = useState([]); 
   const [currentStep, setCurrentStep] = useState(1);
-
   const [formData, setFormData] = useState(INITIAL_FORM_STATE);
 
   useEffect(() => {
@@ -87,6 +88,7 @@ export default function App() {
 
   const navigate = (hash) => { window.location.hash = hash; };
   const showNotification = (msg) => { setNotification(msg); setTimeout(() => setNotification(null), 6000); };
+  
   const updateData = (field, value) => setFormData(prev => ({ ...prev, [field]: value }));
   const updateNested = (parent, field, value) => setFormData(prev => ({ ...prev, [parent]: { ...prev[parent], [field]: value } }));
 
@@ -94,6 +96,13 @@ export default function App() {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${STRAPI_API_TOKEN}`
   });
+
+  const resetAppSession = () => {
+    setVersesQueue([]);
+    setFormData({...INITIAL_FORM_STATE});
+    setCurrentStep(1);
+    navigate('#/dashboard');
+  };
 
   const handleLogin = (e) => {
     e.preventDefault();
@@ -108,6 +117,7 @@ export default function App() {
       Verse_Number: parseInt(formData.hierarchyValues.level2) || 1,
       Text: toStrapiBlocks(formData.sourceText),
       Translation: toStrapiBlocks(formData.verseTranslations.english),
+      Transliteration: "",
       adhyayTitle: String(formData.hierarchyValues.level1 || ""),
       khandaTitle: String(formData.hierarchyValues.level2 || ""),
       sectionTitle: String(formData.hierarchyValues.level3 || ""),
@@ -127,6 +137,7 @@ export default function App() {
 
     setVersesQueue([...versesQueue, shlokaSnapshot]);
 
+    // Auto-increment last level
     const nextValues = { ...formData.hierarchyValues };
     const lastLvlKey = `level${formData.hierarchyCount}`;
     nextValues[lastLvlKey] = (parseInt(nextValues[lastLvlKey]) || 0) + 1 + "";
@@ -140,7 +151,7 @@ export default function App() {
       teekas: prev.teekas.map(t => ({ ...t, text: '', englishTranslation: '' }))
     }));
 
-    showNotification(`Node buffered locally.`);
+    showNotification(`Node cached locally.`);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -172,12 +183,12 @@ export default function App() {
     setIsSubmitting(true);
     try {
       // 1. Author Handshake
-      let authorId = null;
+      let authorDocId = null;
       if (formData.bhashya) {
           const authRes = await fetch(`${STRAPI_URL}/api/authors?filters[name][$eq]=${formData.bhashya}`, { headers: getAuthHeaders() });
           const authData = await authRes.json();
           if (authData.data && authData.data.length > 0) {
-              authorId = authData.data[0].id;
+              authorDocId = authData.data[0].documentId;
           } else {
               const newAuthRes = await fetch(`${STRAPI_URL}/api/authors`, {
                   method: 'POST',
@@ -185,11 +196,11 @@ export default function App() {
                   body: JSON.stringify({ data: { name: formData.bhashya, bio: toStrapiBlocks("System created author.") } })
               });
               const newAuthData = await newAuthRes.json();
-              authorId = newAuthData.data?.id;
+              authorDocId = newAuthData.data?.documentId;
           }
       }
 
-      // 2. Create the Book Parent
+      // 2. Create the Book
       const bookRes = await fetch(`${STRAPI_URL}/api/books`, {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -198,22 +209,22 @@ export default function App() {
             Title: formData.book,
             description: toStrapiBlocks(`${formData.bookIntro}\n\n${formData.shankaracharyaIntro}`),
             totalVerses: finalQueue.length,
-            author: authorId
+            author: authorDocId ? authorDocId : null
           }
         })
       });
       const bookResult = await bookRes.json();
-      if (!bookResult.data) throw new Error(bookResult.error?.message || "Book registration failed.");
-      const bookId = bookResult.data.id;
+      if (!bookResult.data) throw new Error(bookResult.error?.message || "Book creation failed.");
+      const bookDocId = bookResult.data.documentId;
 
       const chapterCache = {}; 
       const sectionCache = {}; 
 
-      // 3. Sequential Relational Mapping
+      // 3. Sequential Relational Mapping (Book -> Chapter -> Section -> Shloka)
       for (let i = 0; i < finalQueue.length; i++) {
         const item = finalQueue[i];
 
-        // 3a. Create/Link Chapter to Book
+        // Ensure Chapter exists for this session's book
         if (!chapterCache[item.adhyayTitle]) {
             const chapRes = await fetch(`${STRAPI_URL}/api/chapters`, {
                 method: 'POST',
@@ -222,17 +233,18 @@ export default function App() {
                   data: { 
                     Title: `${formData.hierarchySanskritNames.level1} ${item.adhyayTitle}`, 
                     Chapter_Number: parseInt(item.adhyayTitle) || 1, 
-                    book: bookId // Link to Book
+                    book: bookDocId // Relation linking to Book
                   } 
                 })
             });
             const chapData = await chapRes.json();
-            chapterCache[item.adhyayTitle] = chapData.data.id;
+            if (!chapData.data) throw new Error(`Chapter ${item.adhyayTitle} failed.`);
+            chapterCache[item.adhyayTitle] = chapData.data.documentId;
         }
 
-        // 3b. Create/Link Section to Chapter
-        let sectionId = null;
-        if (item.sectionTitle && item.sectionTitle !== "0" && item.sectionTitle !== "") {
+        // Ensure Section exists for this session's chapter
+        let sectionDocId = null;
+        if (item.sectionTitle && item.sectionTitle !== "" && item.sectionTitle !== "0") {
             const cacheKey = `${item.adhyayTitle}-${item.sectionTitle}`;
             if (!sectionCache[cacheKey]) {
                 const secRes = await fetch(`${STRAPI_URL}/api/sections`, {
@@ -242,22 +254,22 @@ export default function App() {
                       data: { 
                         Title: `${formData.hierarchySanskritNames.level3} ${item.sectionTitle}`, 
                         Section_Number: parseInt(item.sectionTitle) || 1, 
-                        chapter: chapterCache[item.adhyayTitle] // Link to Chapter
+                        chapter: chapterCache[item.adhyayTitle] // Relation linking to Chapter
                       } 
                     })
                 });
                 const secData = await secRes.json();
-                sectionCache[cacheKey] = secData.data.id;
+                if (secData.data) sectionCache[cacheKey] = secData.data.documentId;
             }
-            sectionId = sectionCache[cacheKey];
+            sectionDocId = sectionCache[cacheKey];
         }
 
-        // 3c. Create Shloka linked to Chapter and Section
+        // 4. Create Shloka linked to specific Chapter and Section DocumentIds
         const payload = {
           data: {
             ...item,
-            chapter: chapterCache[item.adhyayTitle], // Link to Chapter
-            section: sectionId // Link to Section
+            chapter: chapterCache[item.adhyayTitle], 
+            section: sectionDocId 
           }
         };
 
@@ -269,17 +281,12 @@ export default function App() {
 
         if (!sRes.ok) {
            const sErr = await sRes.json();
-           throw new Error(`Node ${i} relation failed: ${sErr.error.message}`);
+           console.error(`Shloka ${i} linking error:`, sErr);
         }
       }
 
-      showNotification(`SUCCESS: Full relational tree published for ${formData.book}.`);
-      
-      // RESET FORM AND NAVIGATE
-      setVersesQueue([]);
-      setFormData(INITIAL_FORM_STATE);
-      setCurrentStep(1);
-      navigate('#/dashboard');
+      showNotification(`SUCCESS: Relational hierarchy published.`);
+      resetAppSession();
 
     } catch (err) {
       console.error("Critical Sync Failure:", err);
@@ -289,23 +296,23 @@ export default function App() {
     }
   };
 
-  // --- VIEWS ---
+  // --- RENDERING ---
 
   if (route === '#/login' || !user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#FDFBF7] p-4">
-        <div className="w-full max-w-md bg-white p-12 rounded-[3rem] shadow-2xl border border-indigo-50 animate-in fade-in zoom-in duration-700">
+        <div className="w-full max-w-md bg-white p-12 rounded-[3rem] shadow-2xl border border-indigo-50">
           <div className="text-center mb-10">
-             <div className="inline-flex items-center gap-4 mb-6 text-left">
+             <div className="inline-flex items-center gap-4 mb-6">
                 <div className="bg-[#D97706] w-14 h-14 rounded-2xl text-white flex items-center justify-center text-3xl shadow-xl">ॐ</div>
-                <h1 className="text-4xl font-black text-[#D97706]">Shloka Portal</h1>
+                <h1 className="text-4xl font-black text-[#D97706] tracking-tighter">Shloka Portal</h1>
              </div>
-             <p className="text-slate-400 font-black uppercase tracking-widest text-[10px] text-center">Administrative Access</p>
+             <p className="text-slate-400 font-black uppercase tracking-widest text-[10px]">Administrative Access</p>
           </div>
           <form onSubmit={handleLogin} className="space-y-6">
             <input name="email" type="text" placeholder="Username" defaultValue="admin@shlokaportal.com" className="w-full p-5 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-[#D97706] transition-all font-bold" />
-            <input name="password" type="password" placeholder="Password" defaultValue="123456" className="w-full p-5 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-[#D97706] transition-all font-bold" />
-            <button type="submit" className="w-full py-5 bg-[#D97706] text-white rounded-2xl font-black text-xl hover:bg-orange-700 active:scale-95 transition-all">Enter Dashboard</button>
+            <input name="password" type="password" placeholder="Passkey" defaultValue="123456" className="w-full p-5 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-[#D97706] transition-all font-bold" />
+            <button type="submit" className="w-full py-5 bg-[#D97706] text-white rounded-2xl font-black text-xl hover:bg-orange-700 active:scale-95 shadow-2xl transition-all">Initiate Access</button>
           </form>
         </div>
       </div>
@@ -315,24 +322,24 @@ export default function App() {
   if (route === '#/dashboard') {
     return (
       <div className="min-h-screen bg-[#FDFBF7]">
-        <header className="bg-white/80 backdrop-blur-xl border-b border-slate-100 px-12 py-6 flex justify-between items-center sticky top-0 z-50">
+        <header className="bg-white border-b px-12 py-6 flex justify-between items-center sticky top-0 z-50">
           <div className="flex items-center gap-4">
              <span className="text-indigo-600 font-black bg-indigo-50 w-12 h-12 flex items-center justify-center rounded-2xl shadow-sm text-xl border">ॐ</span>
-             <h1 className="text-2xl font-black text-slate-800 tracking-tighter">Relational Manager</h1>
+             <h1 className="text-2xl font-black text-slate-800 tracking-tighter text-left">Relational Manager</h1>
           </div>
           <button onClick={() => navigate('#/login')} className="flex items-center gap-2 text-red-500 font-black uppercase tracking-widest text-[10px] bg-red-50 px-5 py-3 rounded-xl hover:bg-red-100 transition-all"><LogOut size={16}/> Logout</button>
         </header>
 
-        <main className="max-w-6xl mx-auto py-32 px-10">
+        <main className="max-w-6xl mx-auto py-32 px-10 text-left">
           <div className="text-center mb-24">
-             <h2 className="text-6xl font-black text-slate-900 mb-6 tracking-tighter text-center">Digitization Engine</h2>
-             <p className="text-slate-400 text-lg font-medium text-center">Coordinate relational data population for manuscripts.</p>
+             <h2 className="text-6xl font-black text-slate-900 mb-6 tracking-tighter">Production Modules</h2>
+             <p className="text-slate-400 text-lg font-medium">Relational data population for manuscripts.</p>
           </div>
-          <div className="grid md:grid-cols-2 gap-12 text-left">
+          <div className="grid md:grid-cols-2 gap-12">
             <div className="group bg-white p-16 rounded-[4rem] border shadow-xl hover:shadow-2xl hover:-translate-y-3 transition-all cursor-pointer overflow-hidden" onClick={() => navigate('#/edit-list')}>
               <Edit3 className="text-orange-600 w-20 h-20 mb-10" />
               <h3 className="text-4xl font-black text-slate-800 mb-6">Modify Existing</h3>
-              <p className="text-slate-400 text-lg leading-relaxed">Adjust registered Shloka records and linked Translation/Commentary nodes.</p>
+              <p className="text-slate-400 text-lg leading-relaxed">Adjust registered Shloka records and linked Translation/Commentary components.</p>
             </div>
             <div className="group bg-white p-16 rounded-[4rem] border shadow-xl hover:shadow-2xl hover:-translate-y-3 transition-all cursor-pointer overflow-hidden" onClick={() => { setVersesQueue([]); setFormData(INITIAL_FORM_STATE); navigate('#/add-entry'); }}>
               <FilePlus className="text-green-600 w-20 h-20 mb-10" />
@@ -348,7 +355,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 py-16 px-8 font-sans text-slate-900 leading-normal text-left">
       {notification && (
-        <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[200] bg-indigo-950 text-white px-10 py-5 rounded-[2rem] shadow-2xl animate-in slide-in-from-top-10 flex items-center gap-4 border-2 border-indigo-500/20 backdrop-blur-xl text-center">
+        <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[200] bg-indigo-950 text-white px-10 py-5 rounded-[2rem] shadow-2xl flex items-center gap-4 border-2 border-indigo-500/20 backdrop-blur-xl">
           <AlertCircle size={18}/>
           <span className="font-black text-sm tracking-wide">{notification}</span>
         </div>
@@ -357,7 +364,7 @@ export default function App() {
       {isSubmitting && (
         <div className="fixed inset-0 z-[300] bg-indigo-950/60 backdrop-blur-2xl flex flex-col items-center justify-center text-white p-10 text-center">
           <Loader2 className="w-24 h-24 text-white animate-spin mb-10" />
-          <h2 className="text-6xl font-black tracking-tighter mb-4 text-center">Relational tree Sync</h2>
+          <h2 className="text-6xl font-black tracking-tighter mb-4 text-center">Relational Tree Sync</h2>
           <p className="text-indigo-200 font-black uppercase tracking-[0.5em] text-xs text-center">Linking {versesQueue.length} Shlokas to Book-Chapter-Section nodes</p>
         </div>
       )}
@@ -367,7 +374,7 @@ export default function App() {
            <div className="flex items-center gap-8">
               <button onClick={() => navigate('#/dashboard')} className="p-5 rounded-2xl bg-slate-50 text-slate-400 hover:text-indigo-600 transition-all shadow-inner"><ArrowLeft size={32}/></button>
               <div>
-                <h1 className="text-4xl font-black text-slate-900 tracking-tighter">{currentStep === 1 ? 'Manuscript Setup' : 'Node Indexing'}</h1>
+                <h1 className="text-4xl font-black text-slate-900 tracking-tighter text-left">{currentStep === 1 ? 'Manuscript Setup' : 'Node Indexing'}</h1>
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 italic text-left">Relational pipeline v2.3</p>
               </div>
            </div>
@@ -388,7 +395,7 @@ export default function App() {
                 <SelectWithAdd label="Bhashya Lineage (Author)" options={['Shankaracharya', 'Ramanujacharya', 'Madhvacharya']} value={formData.bhashya} onChange={(v) => updateData('bhashya', v)} />
               </div>
               <div className="grid gap-10 text-left">
-                <div className="space-y-3 text-left">
+                <div className="space-y-3">
                    <label className="text-xs font-black text-slate-400 uppercase ml-6 block">Book Description (Blocks)</label>
                    <textarea rows={4} className="w-full p-8 bg-slate-50 border-2 rounded-[2.5rem] outline-none text-sm font-bold shadow-inner" placeholder="Archival context..." value={formData.bookIntro} onChange={(e) => updateData('bookIntro', e.target.value)} />
                 </div>
@@ -398,29 +405,28 @@ export default function App() {
                     <textarea rows={5} className="w-full p-8 bg-indigo-50/20 border-2 border-indigo-50 rounded-[2.5rem] font-serif text-xl outline-none focus:bg-white transition-all shadow-sm" placeholder="मङ्गलाचरणम्..." value={formData.shankaracharyaIntro} onChange={(e) => updateData('shankaracharyaIntro', filterDevanagari(e.target.value))} />
                   </div>
                   <div className="space-y-3 text-left">
-                    <label className="text-xs font-black text-slate-400 uppercase ml-6 block">English Rendering</label>
-                    <textarea rows={5} className="w-full p-8 bg-slate-50 border-2 rounded-[2.5rem] outline-none text-sm font-bold" placeholder="Preface translation..." value={formData.shankaracharyaIntroTranslation} onChange={(e) => updateData('shankaracharyaIntroTranslation', filterEnglish(e.target.value))} />
+                    <label className="text-xs font-black text-slate-400 uppercase ml-6 block text-left">English Rendering</label>
+                    <textarea rows={5} className="w-full p-8 bg-slate-50 border-2 rounded-[2.5rem] outline-none text-sm font-bold shadow-sm" placeholder="Preface translation..." value={formData.shankaracharyaIntroTranslation} onChange={(e) => updateData('shankaracharyaIntroTranslation', filterEnglish(e.target.value))} />
                   </div>
                 </div>
               </div>
 
-              {/* Hierarchy Config - RESTORED */}
               <div className="pt-16 border-t-2 border-slate-50 text-left">
                 <div className="flex items-center justify-between mb-8">
                   <div>
-                    <h3 className="text-3xl font-black text-slate-900 tracking-tighter">Hierarchy Structural Depth</h3>
+                    <h3 className="text-3xl font-black text-slate-800 tracking-tighter">Hierarchy Structural Depth</h3>
                     <p className="text-sm text-slate-400 font-bold uppercase mt-1 italic tracking-widest">Define metadata depth for relational nodes.</p>
                   </div>
-                  <div className="flex gap-10 items-center bg-slate-50 p-6 rounded-[3rem] shadow-inner">
+                  <div className="flex gap-10 items-center bg-slate-50 p-6 rounded-[3rem] shadow-inner border-2 border-slate-100">
                       <button className="w-16 h-16 bg-white shadow-xl rounded-3xl flex items-center justify-center text-slate-400 hover:text-red-500 transition-all" onClick={() => updateData('hierarchyCount', Math.max(1, formData.hierarchyCount - 1))}><Minus size={32}/></button>
                       <span className="text-6xl font-black text-indigo-600 min-w-[5rem] text-center">{formData.hierarchyCount}</span>
                       <button className="w-16 h-16 bg-white shadow-xl rounded-3xl flex items-center justify-center text-slate-400 hover:text-green-500 transition-all" onClick={() => updateData('hierarchyCount', Math.min(4, formData.hierarchyCount + 1))}><Plus size={32}/></button>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-6">
+                <div className="grid grid-cols-2 gap-6 text-left">
                   {['level1', 'level2', 'level3', 'level4'].slice(0, formData.hierarchyCount).map((level, idx) => (
                     <div key={level}>
-                      <label className="text-xs font-black text-slate-400 uppercase ml-2 block mb-2 tracking-widest">Level {idx+1} Sanskrit Name</label>
+                      <label className="text-xs font-black text-slate-400 uppercase ml-2 block mb-2 tracking-widest text-left">Level {idx+1} Sanskrit Name</label>
                       <input type="text" className="w-full p-4 border-2 border-slate-100 rounded-2xl outline-none focus:border-indigo-400 font-serif font-bold text-indigo-900 bg-indigo-50/20" value={formData.hierarchySanskritNames[level]} onChange={(e) => updateNested('hierarchySanskritNames', level, filterDevanagari(e.target.value))} placeholder="e.g. अध्याय" />
                     </div>
                   ))}
@@ -429,7 +435,7 @@ export default function App() {
 
               <div className="pt-16 border-t-2 border-slate-50 text-left">
                 <h3 className="text-xs font-black mb-8 uppercase tracking-[0.2em] text-slate-400 flex items-center gap-3"><Languages size={20}/> Tika Allocations</h3>
-                <div className="grid grid-cols-2 gap-6 text-left">
+                <div className="grid grid-cols-2 gap-6">
                   {formData.selectedTeekas.map((teeka, idx) => (
                     <div key={idx} className="flex gap-3 animate-in zoom-in duration-500">
                       <SelectWithAdd options={TEEKAS_BY_BOOK.default} value={teeka} onChange={(v) => {
@@ -469,15 +475,15 @@ export default function App() {
               <div className="grid gap-12">
                 <div className="space-y-4 text-left">
                    <label className="text-xs font-black text-slate-400 uppercase ml-10 tracking-widest">Canonical Translation</label>
-                   <textarea rows={3} className="w-full p-10 border-2 border-slate-100 rounded-[3rem] outline-none text-xl font-bold shadow-sm focus:border-indigo-200" placeholder="English rendering..." value={formData.verseTranslations.english} onChange={(e) => updateNested('verseTranslations', 'english', filterEnglish(e.target.value))} />
+                   <textarea rows={3} className="w-full p-10 border-2 border-slate-100 rounded-[3rem] outline-none text-xl font-bold shadow-sm focus:border-indigo-200 transition-all" placeholder="English rendering..." value={formData.verseTranslations.english} onChange={(e) => updateNested('verseTranslations', 'english', filterEnglish(e.target.value))} />
                 </div>
                 <div className="grid grid-cols-2 gap-12">
                   <div className="space-y-4 text-left">
                     <label className="text-xs font-black text-indigo-400 uppercase ml-10 tracking-widest block">Bhashyam (Sanskrit)</label>
-                    <textarea rows={6} className="w-full p-10 bg-indigo-50/10 border-2 border-indigo-50 rounded-[3rem] font-serif text-2xl outline-none focus:border-indigo-200 transition-all shadow-sm" value={formData.bhashyaContent.sanskrit} onChange={(e) => updateNested('bhashyaContent', 'sanskrit', filterDevanagari(e.target.value))} />
+                    <textarea rows={6} className="w-full p-10 bg-indigo-50/10 border-2 border-indigo-50 rounded-[3rem] font-serif text-2xl outline-none focus:bg-white transition-all shadow-sm focus:border-indigo-200" value={formData.bhashyaContent.sanskrit} onChange={(e) => updateNested('bhashyaContent', 'sanskrit', filterDevanagari(e.target.value))} />
                   </div>
                   <div className="space-y-4 text-left">
-                    <label className="text-xs font-black text-slate-400 uppercase ml-10 tracking-widest block">Bhashyam (English)</label>
+                    <label className="text-xs font-black text-slate-400 uppercase ml-10 tracking-widest block text-left">Bhashyam (English)</label>
                     <textarea rows={6} className="w-full p-10 bg-slate-50 border-2 rounded-[3rem] outline-none text-sm font-bold shadow-sm focus:border-indigo-200 transition-all" value={formData.bhashyaContent.english} onChange={(e) => updateNested('bhashyaContent', 'english', filterEnglish(e.target.value))} />
                   </div>
                 </div>
@@ -498,10 +504,10 @@ export default function App() {
                        <MessageSquare size={28} className="text-slate-200 group-hover:text-indigo-400 transition-all"/>
                     </div>
                     <div className="grid gap-8">
-                       <textarea rows={4} className="w-full p-10 bg-white border-2 border-slate-100 rounded-[3rem] font-serif text-2xl outline-none shadow-sm focus:border-indigo-300" placeholder={`Tika Sanskrit...`} value={teeka.text} onChange={(e) => {
+                       <textarea rows={4} className="w-full p-10 bg-white border-2 border-slate-100 rounded-[3rem] font-serif text-2xl outline-none shadow-sm focus:border-indigo-300 transition-all" placeholder={`Tika Sanskrit...`} value={teeka.text} onChange={(e) => {
                           const news = [...formData.teekas]; news[idx].text = filterDevanagari(e.target.value); updateData('teekas', news);
                        }} />
-                       <textarea rows={3} className="w-full p-10 bg-white border-2 border-slate-100 rounded-[3rem] outline-none text-sm font-bold leading-relaxed shadow-sm focus:border-indigo-300" placeholder="Tika English..." value={teeka.englishTranslation} onChange={(e) => {
+                       <textarea rows={3} className="w-full p-10 bg-white border-2 border-slate-100 rounded-[3rem] outline-none text-sm font-bold leading-relaxed shadow-sm focus:border-indigo-300 transition-all" placeholder="Tika English..." value={teeka.englishTranslation} onChange={(e) => {
                           const news = [...formData.teekas]; news[idx].englishTranslation = filterEnglish(e.target.value); updateData('teekas', news);
                        }} />
                     </div>
@@ -531,7 +537,7 @@ export default function App() {
               }} disabled={!formData.book} className="px-16 py-6 bg-indigo-600 text-white rounded-[2rem] flex items-center gap-5 font-black hover:bg-indigo-700 shadow-2xl uppercase tracking-widest text-xs border-b-8 border-indigo-800 transition-all active:scale-95">Transcription Phase <ChevronRight size={24}/></button>
             ) : (
               <>
-                <button onClick={handleSaveAndNext} disabled={!formData.sourceText.trim() || isSubmitting} className="px-10 py-6 bg-indigo-600 text-white rounded-[2rem] flex items-center gap-4 font-black hover:bg-indigo-700 shadow-2xl uppercase tracking-widest text-xs border-b-8 border-indigo-800 transition-all active:scale-95"><Plus size={26}/> Index Current Node</button>
+                <button onClick={handleSaveAndNext} disabled={!formData.sourceText.trim() || isSubmitting} className="px-10 py-6 bg-indigo-600 text-white rounded-[2rem] flex items-center gap-4 font-black hover:bg-indigo-700 shadow-2xl uppercase tracking-widest text-xs border-b-8 border-indigo-800 transition-all active:scale-95"><Plus size={26}/> Index Current node</button>
                 <button onClick={handleFinishAndSubmit} disabled={isSubmitting} className="px-16 py-6 bg-green-600 text-white rounded-[2rem] font-black hover:bg-green-700 shadow-2xl active:scale-95 transition-all flex items-center gap-4 uppercase tracking-widest text-xs border-b-8 border-green-800">
                   {isSubmitting ? <Loader2 className="animate-spin" /> : <CloudUpload size={26}/>} Sync Archive
                 </button>
