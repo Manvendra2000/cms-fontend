@@ -14,7 +14,7 @@ const MOCK_BOOKS_LIST = [
   'ईशावास्योपनिषद्भाष्यम्', 'केनोपनिषत्पदभाष्यम्', 'केनोपनिषद्वाक्यभाष्यम्',
   'कठोपनिषद्भाष्यम्', 'प्रश्नोपनिषद्भाष्यम्', 'मुण्डकोपनिषद्भाष्यम्',
   'माण्डूक्योपनिषद्भाष्यम्', 'तैत्तिरीयोपनिषद्भाष्यम्', 'ऐतरेयोपनिषद्भाष्यम्',
-  'छान्दोग्योपनिषद्भाष्यम्', 'बृहदारण्यकोपनिषद्भाष्यम्', 'श्रीमद्भगवद्गीताभाष्यम्', 'ब्रह्मसूत्रभाष्यम्'
+  'छान्दोग्योपनिषद्भाष्यम्', 'बृहदारण्यकोपनिषद्भाष्यम्', 'श्रीमद्भगवद्गीताभाष्यम्', 'ब्रह्मसूत्रभाष्यम्', 'श्रीमद्भगवद गीता'
 ];
 
 const TEEKAS_BY_BOOK = {
@@ -31,6 +31,16 @@ const toStrapiBlocks = (text) => {
     type: 'paragraph',
     children: [{ type: 'text', text: line }]
   }));
+};
+
+const INITIAL_FORM_STATE = {
+  book: '', bookIntro: '', shankaracharyaIntro: '', shankaracharyaIntroTranslation: '', bhashya: '',
+  selectedTeekas: [''], hierarchyCount: 2,
+  hierarchySanskritNames: { level1: 'अध्याय', level2: 'श्लोक', level3: 'प्रकरण', level4: 'पद' },
+  hierarchyValues: { level1: '1', level2: '1', level3: '1', level4: '' },
+  sourceText: '', verseTranslations: { english: '', others: [] },
+  bhashyaContent: { sanskrit: '', english: '', others: [] },
+  teekas: []
 };
 
 const SelectWithAdd = ({ label, options, value, onChange, placeholder = "Select...", disabled = false }) => {
@@ -67,15 +77,7 @@ export default function App() {
   const [versesQueue, setVersesQueue] = useState([]); 
   const [currentStep, setCurrentStep] = useState(1);
 
-  const [formData, setFormData] = useState({
-    book: '', bookIntro: '', shankaracharyaIntro: '', shankaracharyaIntroTranslation: '', bhashya: '',
-    selectedTeekas: [''], hierarchyCount: 2,
-    hierarchySanskritNames: { level1: 'अध्याय', level2: 'श्लोक', level3: 'प्रकरण', level4: 'पद' },
-    hierarchyValues: { level1: '1', level2: '1', level3: '1', level4: '' },
-    sourceText: '', verseTranslations: { english: '', others: [] },
-    bhashyaContent: { sanskrit: '', english: '', others: [] },
-    teekas: []
-  });
+  const [formData, setFormData] = useState(INITIAL_FORM_STATE);
 
   useEffect(() => {
     const handleHashChange = () => setRoute(window.location.hash);
@@ -187,7 +189,7 @@ export default function App() {
           }
       }
 
-      // 2. Create the Book
+      // 2. Create the Book Parent
       const bookRes = await fetch(`${STRAPI_URL}/api/books`, {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -201,7 +203,7 @@ export default function App() {
         })
       });
       const bookResult = await bookRes.json();
-      if (!bookResult.data) throw new Error(bookResult.error?.message || "Book creation failed.");
+      if (!bookResult.data) throw new Error(bookResult.error?.message || "Book registration failed.");
       const bookId = bookResult.data.id;
 
       const chapterCache = {}; 
@@ -211,7 +213,7 @@ export default function App() {
       for (let i = 0; i < finalQueue.length; i++) {
         const item = finalQueue[i];
 
-        // Ensure Chapter exists and links to Book
+        // 3a. Create/Link Chapter to Book
         if (!chapterCache[item.adhyayTitle]) {
             const chapRes = await fetch(`${STRAPI_URL}/api/chapters`, {
                 method: 'POST',
@@ -220,7 +222,7 @@ export default function App() {
                   data: { 
                     Title: `${formData.hierarchySanskritNames.level1} ${item.adhyayTitle}`, 
                     Chapter_Number: parseInt(item.adhyayTitle) || 1, 
-                    book: bookId 
+                    book: bookId // Link to Book
                   } 
                 })
             });
@@ -228,9 +230,9 @@ export default function App() {
             chapterCache[item.adhyayTitle] = chapData.data.id;
         }
 
-        // Ensure Section exists and links to Chapter
+        // 3b. Create/Link Section to Chapter
         let sectionId = null;
-        if (item.sectionTitle && item.sectionTitle !== "0") {
+        if (item.sectionTitle && item.sectionTitle !== "0" && item.sectionTitle !== "") {
             const cacheKey = `${item.adhyayTitle}-${item.sectionTitle}`;
             if (!sectionCache[cacheKey]) {
                 const secRes = await fetch(`${STRAPI_URL}/api/sections`, {
@@ -240,7 +242,7 @@ export default function App() {
                       data: { 
                         Title: `${formData.hierarchySanskritNames.level3} ${item.sectionTitle}`, 
                         Section_Number: parseInt(item.sectionTitle) || 1, 
-                        chapter: chapterCache[item.adhyayTitle] 
+                        chapter: chapterCache[item.adhyayTitle] // Link to Chapter
                       } 
                     })
                 });
@@ -250,19 +252,12 @@ export default function App() {
             sectionId = sectionCache[cacheKey];
         }
 
-        // 4. Create Shloka Payload (Linking relations strictly)
+        // 3c. Create Shloka linked to Chapter and Section
         const payload = {
           data: {
-            Verse_Number: item.Verse_Number,
-            Text: item.Text,
-            Translation: item.Translation,
-            Transliteration: "",
-            adhyayTitle: item.adhyayTitle,
-            khandaTitle: item.khandaTitle,
-            sectionTitle: item.sectionTitle,
-            Commentry: item.Commentry,
-            chapter: chapterCache[item.adhyayTitle],
-            section: sectionId
+            ...item,
+            chapter: chapterCache[item.adhyayTitle], // Link to Chapter
+            section: sectionId // Link to Section
           }
         };
 
@@ -274,15 +269,18 @@ export default function App() {
 
         if (!sRes.ok) {
            const sErr = await sRes.json();
-           // Attempt fallback if simple ID relation fails
-           const retryPayload = { data: { ...payload.data, chapter: { connect: [chapterCache[item.adhyayTitle]] }, section: sectionId ? { connect: [sectionId] } : null } };
-           await fetch(`${STRAPI_URL}/api/shlokas`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(retryPayload) });
+           throw new Error(`Node ${i} relation failed: ${sErr.error.message}`);
         }
       }
 
-      showNotification(`SUCCESS: Relational tree published.`);
+      showNotification(`SUCCESS: Full relational tree published for ${formData.book}.`);
+      
+      // RESET FORM AND NAVIGATE
       setVersesQueue([]);
+      setFormData(INITIAL_FORM_STATE);
+      setCurrentStep(1);
       navigate('#/dashboard');
+
     } catch (err) {
       console.error("Critical Sync Failure:", err);
       showNotification(`Sync Error: ${err.message}`);
@@ -300,14 +298,14 @@ export default function App() {
           <div className="text-center mb-10">
              <div className="inline-flex items-center gap-4 mb-6 text-left">
                 <div className="bg-[#D97706] w-14 h-14 rounded-2xl text-white flex items-center justify-center text-3xl shadow-xl">ॐ</div>
-                <h1 className="text-4xl font-black text-[#D97706] tracking-tighter">Shloka Portal</h1>
+                <h1 className="text-4xl font-black text-[#D97706]">Shloka Portal</h1>
              </div>
              <p className="text-slate-400 font-black uppercase tracking-widest text-[10px] text-center">Administrative Access</p>
           </div>
           <form onSubmit={handleLogin} className="space-y-6">
             <input name="email" type="text" placeholder="Username" defaultValue="admin@shlokaportal.com" className="w-full p-5 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-[#D97706] transition-all font-bold" />
             <input name="password" type="password" placeholder="Password" defaultValue="123456" className="w-full p-5 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-[#D97706] transition-all font-bold" />
-            <button type="submit" className="w-full py-5 bg-[#D97706] text-white rounded-2xl font-black text-xl hover:bg-orange-700 shadow-xl transition-all">Enter Dashboard</button>
+            <button type="submit" className="w-full py-5 bg-[#D97706] text-white rounded-2xl font-black text-xl hover:bg-orange-700 active:scale-95 transition-all">Enter Dashboard</button>
           </form>
         </div>
       </div>
@@ -336,7 +334,7 @@ export default function App() {
               <h3 className="text-4xl font-black text-slate-800 mb-6">Modify Existing</h3>
               <p className="text-slate-400 text-lg leading-relaxed">Adjust registered Shloka records and linked Translation/Commentary nodes.</p>
             </div>
-            <div className="group bg-white p-16 rounded-[4rem] border shadow-xl hover:shadow-2xl hover:-translate-y-3 transition-all cursor-pointer overflow-hidden" onClick={() => { setVersesQueue([]); navigate('#/add-entry'); }}>
+            <div className="group bg-white p-16 rounded-[4rem] border shadow-xl hover:shadow-2xl hover:-translate-y-3 transition-all cursor-pointer overflow-hidden" onClick={() => { setVersesQueue([]); setFormData(INITIAL_FORM_STATE); navigate('#/add-entry'); }}>
               <FilePlus className="text-green-600 w-20 h-20 mb-10" />
               <h3 className="text-4xl font-black text-slate-800 mb-6">Archive New</h3>
               <p className="text-slate-400 text-lg leading-relaxed">Deploy a fresh relational volume tree including Author, Book, and Shlokas.</p>
@@ -359,7 +357,7 @@ export default function App() {
       {isSubmitting && (
         <div className="fixed inset-0 z-[300] bg-indigo-950/60 backdrop-blur-2xl flex flex-col items-center justify-center text-white p-10 text-center">
           <Loader2 className="w-24 h-24 text-white animate-spin mb-10" />
-          <h2 className="text-6xl font-black tracking-tighter mb-4 text-center">Relational Tree Sync</h2>
+          <h2 className="text-6xl font-black tracking-tighter mb-4 text-center">Relational tree Sync</h2>
           <p className="text-indigo-200 font-black uppercase tracking-[0.5em] text-xs text-center">Linking {versesQueue.length} Shlokas to Book-Chapter-Section nodes</p>
         </div>
       )}
@@ -370,7 +368,7 @@ export default function App() {
               <button onClick={() => navigate('#/dashboard')} className="p-5 rounded-2xl bg-slate-50 text-slate-400 hover:text-indigo-600 transition-all shadow-inner"><ArrowLeft size={32}/></button>
               <div>
                 <h1 className="text-4xl font-black text-slate-900 tracking-tighter">{currentStep === 1 ? 'Manuscript Setup' : 'Node Indexing'}</h1>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 italic">Relational pipeline v2.3</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 italic text-left">Relational pipeline v2.3</p>
               </div>
            </div>
            <div className="flex gap-6">
@@ -384,7 +382,7 @@ export default function App() {
 
         <div className="bg-white p-20 rounded-[5rem] shadow-2xl border min-h-[800px] relative overflow-hidden">
           {currentStep === 1 ? (
-            <div className="space-y-16 animate-in fade-in slide-in-from-bottom-12 duration-1000">
+            <div className="space-y-16 animate-in fade-in slide-in-from-bottom-12 duration-1000 text-left">
               <div className="grid grid-cols-2 gap-12 text-left">
                 <SelectWithAdd label="Volume Title" options={MOCK_BOOKS_LIST} value={formData.book} onChange={(v) => updateData('book', v)} />
                 <SelectWithAdd label="Bhashya Lineage (Author)" options={['Shankaracharya', 'Ramanujacharya', 'Madhvacharya']} value={formData.bhashya} onChange={(v) => updateData('bhashya', v)} />
@@ -401,7 +399,7 @@ export default function App() {
                   </div>
                   <div className="space-y-3 text-left">
                     <label className="text-xs font-black text-slate-400 uppercase ml-6 block">English Rendering</label>
-                    <textarea rows={5} className="w-full p-8 bg-slate-50 border-2 rounded-[2.5rem] outline-none text-sm font-bold shadow-sm" placeholder="Preface translation..." value={formData.shankaracharyaIntroTranslation} onChange={(e) => updateData('shankaracharyaIntroTranslation', filterEnglish(e.target.value))} />
+                    <textarea rows={5} className="w-full p-8 bg-slate-50 border-2 rounded-[2.5rem] outline-none text-sm font-bold" placeholder="Preface translation..." value={formData.shankaracharyaIntroTranslation} onChange={(e) => updateData('shankaracharyaIntroTranslation', filterEnglish(e.target.value))} />
                   </div>
                 </div>
               </div>
@@ -457,7 +455,7 @@ export default function App() {
                     <input type="text" className="bg-transparent text-white text-5xl font-black outline-none w-24 text-center border-b-4 border-indigo-800 focus:border-white transition-all" value={formData.hierarchyValues[lvl]} onChange={(e) => updateNested('hierarchyValues', lvl, e.target.value)} />
                   </div>
                 ))}
-                <div className="bg-indigo-900/50 p-8 rounded-[2.5rem] border-2 border-indigo-800/30 text-right shadow-inner">
+                <div className="bg-indigo-900/50 p-8 rounded-[2.5rem] border-2 border-indigo-800/30 text-right">
                    <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">Active Queue</p>
                    <p className="text-4xl font-black text-white">{versesQueue.length} <span className="text-sm text-indigo-600 italic">Indexed</span></p>
                 </div>
@@ -471,7 +469,7 @@ export default function App() {
               <div className="grid gap-12">
                 <div className="space-y-4 text-left">
                    <label className="text-xs font-black text-slate-400 uppercase ml-10 tracking-widest">Canonical Translation</label>
-                   <textarea rows={3} className="w-full p-10 border-2 border-slate-100 rounded-[3rem] outline-none text-xl font-bold leading-relaxed shadow-sm focus:border-indigo-200 transition-all" placeholder="English rendering..." value={formData.verseTranslations.english} onChange={(e) => updateNested('verseTranslations', 'english', filterEnglish(e.target.value))} />
+                   <textarea rows={3} className="w-full p-10 border-2 border-slate-100 rounded-[3rem] outline-none text-xl font-bold shadow-sm focus:border-indigo-200" placeholder="English rendering..." value={formData.verseTranslations.english} onChange={(e) => updateNested('verseTranslations', 'english', filterEnglish(e.target.value))} />
                 </div>
                 <div className="grid grid-cols-2 gap-12">
                   <div className="space-y-4 text-left">
