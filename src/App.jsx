@@ -10,15 +10,14 @@ import {
 const STRAPI_URL = "http://localhost:1337";
 const STRAPI_API_TOKEN = "5c6b3b5ef3b79a3e8e61ad906060e2ef2502210a6872df54550b83cccee7e1e83ec814a4d72e4f2a0a77447cc6b667e27b4e4b606f11414bb1dd2f05d3e22b59ceefa244e94d85479f18ed794b13956cf5020bdadd2133e21e5010ae57c189b29a3da29d92664622accb575e0245067f8a96c4d4988acc84247dca16a67fdb07"; 
 
-const MOCK_BOOKS_LIST = [
-  'ईशावास्योपनिषद्भाष्यम्', 'केनोपनिषत्पदभाष्यम्', 'केनोपनिषद्वाक्यभाष्यम्',
-  'कठोपनिषद्भाष्यम्', 'प्रश्नोपनिषद्भाष्यम्', 'मुण्डकोपनिषद्भाष्यम्',
-  'माण्डूक्योपनिषद्भाष्यम्', 'तैत्तिरीयोपनिषद्भाष्यम्', 'ऐतरेयोपनिषद्भाष्यम्',
-  'छान्दोग्योपनिषद्भाष्यम्', 'बृहदारण्यकोपनिषद्भाष्यम्', 'श्रीमद्भगवद्गीताभाष्यम्', 'ब्रह्मसूत्रभाष्यम्'
-];
-
-const TEEKAS_BY_BOOK = {
-  'default': ['Anandagiri', 'Shankaracharya', 'Sridhara Svamin', 'Madhusudana Saraswati', 'Abhirama Vidyamani']
+const INITIAL_FORM_STATE = {
+  book: '', bookIntro: '', shankaracharyaIntro: '', shankaracharyaIntroTranslation: '', bhashya: '',
+  selectedTeekas: [''], hierarchyCount: 2,
+  hierarchySanskritNames: { level1: 'अध्याय', level2: 'श्लोक', level3: 'प्रकरण', level4: 'पद' },
+  hierarchyValues: { level1: '1', level2: '1', level3: '1', level4: '' },
+  sourceText: '', verseTranslations: { english: '', others: [] },
+  bhashyaContent: { sanskrit: '', english: '', others: [] },
+  teekas: []
 };
 
 // --- UTILS ---
@@ -33,36 +32,34 @@ const toStrapiBlocks = (text) => {
   }));
 };
 
-const INITIAL_FORM_STATE = {
-  book: '', bookIntro: '', shankaracharyaIntro: '', shankaracharyaIntroTranslation: '', bhashya: '',
-  selectedTeekas: [''], hierarchyCount: 2,
-  hierarchySanskritNames: { level1: 'अध्याय', level2: 'श्लोक', level3: 'प्रकरण', level4: 'पद' },
-  hierarchyValues: { level1: '1', level2: '1', level3: '1', level4: '' },
-  sourceText: '', verseTranslations: { english: '', others: [] },
-  bhashyaContent: { sanskrit: '', english: '', others: [] },
-  teekas: []
-};
-
 // --- UI COMPONENTS ---
 
-const SelectWithAdd = ({ label, options, value, onChange, placeholder = "Select...", disabled = false }) => {
+const SelectWithAdd = ({ label, options, value, onChange, onAdd, placeholder = "Select...", disabled = false }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [newValue, setNewValue] = useState('');
-  const handleAdd = () => { if (newValue.trim()) { onChange(newValue.trim()); setIsAdding(false); setNewValue(''); } };
+  
+  const handleAdd = async () => { 
+    if (newValue.trim()) { 
+      await onAdd(newValue.trim());
+      setIsAdding(false); 
+      setNewValue(''); 
+    } 
+  };
+
   return (
     <div className="flex flex-col space-y-1 w-full text-left">
       {label && <label className="text-sm font-black text-slate-600 mb-1 uppercase tracking-tighter">{label}</label>}
       {isAdding ? (
         <div className="flex items-center space-x-2 animate-in fade-in duration-200">
           <input type="text" className="flex-1 p-3 border-2 border-indigo-100 rounded-xl outline-none text-sm focus:border-indigo-500" value={newValue} onChange={(e) => setNewValue(e.target.value)} autoFocus />
-          <button onClick={handleAdd} className="p-3 bg-indigo-600 text-white rounded-xl shadow-md"><Check size={18} /></button>
-          <button onClick={() => setIsAdding(false)} className="text-xs text-slate-400 font-bold uppercase tracking-tighter">Cancel</button>
+          <button onClick={handleAdd} className="p-3 bg-indigo-600 text-white rounded-xl shadow-md hover:bg-indigo-700 transition-colors"><Check size={18} /></button>
+          <button onClick={() => setIsAdding(false)} className="text-xs text-slate-400 font-bold uppercase tracking-tighter px-2">Cancel</button>
         </div>
       ) : (
         <select className="p-3 border-2 border-slate-100 rounded-xl bg-white disabled:bg-slate-50 text-sm outline-none focus:border-indigo-500 transition-all font-bold text-slate-700" value={value} disabled={disabled} onChange={(e) => e.target.value === '__ADD_NEW__' ? setIsAdding(true) : onChange(e.target.value)}>
           <option value="" disabled>{placeholder}</option>
-          {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-          <option value="__ADD_NEW__" className="text-indigo-600 font-black">+ Create Custom Entry</option>
+          {options.map(opt => <option key={opt.id || opt.name || opt} value={opt.name || opt}>{opt.name || opt}</option>)}
+          <option value="__ADD_NEW__" className="text-indigo-600 font-black">+ Create New Entry</option>
         </select>
       )}
     </div>
@@ -80,6 +77,36 @@ export default function App() {
   const [currentStep, setCurrentStep] = useState(1);
   const [formData, setFormData] = useState(INITIAL_FORM_STATE);
 
+  // Dynamic Dropdown States
+  const [booksList, setBooksList] = useState([]);
+  const [authorsList, setAuthorsList] = useState([]);
+
+  const getAuthHeaders = () => ({
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${STRAPI_API_TOKEN}`
+  });
+
+  // Fetch Dropdown Content from Strapi
+  const fetchDropdownData = async () => {
+    try {
+      const [booksRes, authorsRes] = await Promise.all([
+        fetch(`${STRAPI_URL}/api/books?fields[0]=Title&pagination[limit]=100`, { headers: getAuthHeaders() }),
+        fetch(`${STRAPI_URL}/api/authors?fields[0]=name&pagination[limit]=100`, { headers: getAuthHeaders() })
+      ]);
+      const booksData = await booksRes.json();
+      const authorsData = await authorsRes.json();
+
+      if (booksData.data) setBooksList(booksData.data.map(b => ({ id: b.documentId, name: b.Title })));
+      if (authorsData.data) setAuthorsList(authorsData.data.map(a => ({ id: a.documentId, name: a.name })));
+    } catch (err) {
+      console.error("Failed to fetch dropdown data:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (user) fetchDropdownData();
+  }, [user]);
+
   useEffect(() => {
     const handleHashChange = () => setRoute(window.location.hash);
     window.addEventListener('hashchange', handleHashChange);
@@ -88,14 +115,39 @@ export default function App() {
 
   const navigate = (hash) => { window.location.hash = hash; };
   const showNotification = (msg) => { setNotification(msg); setTimeout(() => setNotification(null), 6000); };
-  
   const updateData = (field, value) => setFormData(prev => ({ ...prev, [field]: value }));
   const updateNested = (parent, field, value) => setFormData(prev => ({ ...prev, [parent]: { ...prev[parent], [field]: value } }));
 
-  const getAuthHeaders = () => ({
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${STRAPI_API_TOKEN}`
-  });
+  // Handle Dynamic Creation of New Options
+  const handleAddNewBook = async (newTitle) => {
+    try {
+      const res = await fetch(`${STRAPI_URL}/api/books`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ data: { Title: newTitle } })
+      });
+      if (res.ok) {
+        await fetchDropdownData();
+        updateData('book', newTitle);
+        showNotification(`Volume "${newTitle}" added to Strapi.`);
+      }
+    } catch (err) { console.error(err); }
+  };
+
+  const handleAddNewAuthor = async (newName, fieldToUpdate) => {
+    try {
+      const res = await fetch(`${STRAPI_URL}/api/authors`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ data: { name: newName } })
+      });
+      if (res.ok) {
+        await fetchDropdownData();
+        if (fieldToUpdate === 'bhashya') updateData('bhashya', newName);
+        showNotification(`Author "${newName}" added to Strapi.`);
+      }
+    } catch (err) { console.error(err); }
+  };
 
   const resetAppSession = () => {
     setVersesQueue([]);
@@ -136,7 +188,6 @@ export default function App() {
     };
 
     setVersesQueue([...versesQueue, shlokaSnapshot]);
-
     const nextValues = { ...formData.hierarchyValues };
     const lastLvlKey = `level${formData.hierarchyCount}`;
     nextValues[lastLvlKey] = (parseInt(nextValues[lastLvlKey]) || 0) + 1 + "";
@@ -149,9 +200,7 @@ export default function App() {
       bhashyaContent: { sanskrit: '', english: '', others: [] },
       teekas: prev.teekas.map(t => ({ ...t, text: '', englishTranslation: '' }))
     }));
-
     showNotification(`Node cached locally.`);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleFinishAndSubmit = async () => {
@@ -181,66 +230,38 @@ export default function App() {
 
     setIsSubmitting(true);
     try {
-      // 1. Author Handshake
-      let authorDocId = null;
-      if (formData.bhashya) {
-          const authRes = await fetch(`${STRAPI_URL}/api/authors?filters[name][$eq]=${formData.bhashya}`, { headers: getAuthHeaders() });
-          const authData = await authRes.json();
-          if (authData.data && authData.data.length > 0) {
-              authorDocId = authData.data[0].documentId;
-          } else {
-              const newAuthRes = await fetch(`${STRAPI_URL}/api/authors`, {
-                  method: 'POST',
-                  headers: getAuthHeaders(),
-                  body: JSON.stringify({ data: { name: formData.bhashya, bio: toStrapiBlocks("Created via portal.") } })
-              });
-              const newAuthData = await newAuthRes.json();
-              authorDocId = newAuthData.data?.documentId;
-          }
-      }
+      // 1. Link or Find Book (since we might have added it via dropdown)
+      const bookLookup = await fetch(`${STRAPI_URL}/api/books?filters[Title][$eq]=${formData.book}`, { headers: getAuthHeaders() });
+      const bookData = await bookLookup.json();
+      let bookDocId = bookData.data?.[0]?.documentId;
 
-      // 2. Create the Book Parent
-      const bookRes = await fetch(`${STRAPI_URL}/api/books`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          data: {
-            Title: formData.book,
-            description: toStrapiBlocks(`${formData.bookIntro}\n\n${formData.shankaracharyaIntro}`),
-            totalVerses: finalQueue.length,
-            author: authorDocId
-          }
-        })
-      });
-      const bookResult = await bookRes.json();
-      if (!bookResult.data) throw new Error(bookResult.error?.message || "Book creation failed.");
-      const bookDocId = bookResult.data.documentId;
+      if (!bookDocId) {
+        const bookCreateRes = await fetch(`${STRAPI_URL}/api/books`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ data: { Title: formData.book, description: toStrapiBlocks(formData.bookIntro) } })
+        });
+        const bookCreateData = await bookCreateRes.json();
+        bookDocId = bookCreateData.data.documentId;
+      }
 
       const chapterCache = {}; 
       const sectionCache = {}; 
 
-      // 3. Relational Mapping Loop
       for (let i = 0; i < finalQueue.length; i++) {
         const item = finalQueue[i];
-
-        // Ensure Chapter exists and links to Book
         if (!chapterCache[item.adhyayTitle]) {
             const chapRes = await fetch(`${STRAPI_URL}/api/chapters`, {
                 method: 'POST',
                 headers: getAuthHeaders(),
                 body: JSON.stringify({ 
-                  data: { 
-                    Title: `${formData.hierarchySanskritNames.level1} ${item.adhyayTitle}`, 
-                    Chapter_Number: parseInt(item.adhyayTitle) || 1, 
-                    book: bookDocId 
-                  } 
+                  data: { Title: `${formData.hierarchySanskritNames.level1} ${item.adhyayTitle}`, Chapter_Number: parseInt(item.adhyayTitle) || 1, book: bookDocId } 
                 })
             });
             const chapData = await chapRes.json();
             chapterCache[item.adhyayTitle] = chapData.data.documentId;
         }
 
-        // Ensure Section exists and links to Chapter
         let sectionDocId = null;
         if (item.sectionTitle && item.sectionTitle !== "" && item.sectionTitle !== "0") {
             const cacheKey = `${item.adhyayTitle}-${item.sectionTitle}`;
@@ -249,11 +270,7 @@ export default function App() {
                     method: 'POST',
                     headers: getAuthHeaders(),
                     body: JSON.stringify({ 
-                      data: { 
-                        Title: `${formData.hierarchySanskritNames.level3} ${item.sectionTitle}`, 
-                        Section_Number: parseInt(item.sectionTitle) || 1, 
-                        chapter: chapterCache[item.adhyayTitle] 
-                      } 
+                      data: { Title: `${formData.hierarchySanskritNames.level3} ${item.sectionTitle}`, Section_Number: parseInt(item.sectionTitle) || 1, chapter: chapterCache[item.adhyayTitle] } 
                     })
                 });
                 const secData = await secRes.json();
@@ -262,8 +279,6 @@ export default function App() {
             sectionDocId = sectionCache[cacheKey];
         }
 
-        // 4. Create Shloka linked to Book, Chapter and Section
-        // TARGETED FIX: Relation field is 'books' as per Strapi 5 configuration logs
         const payload = {
           data: {
             ...item,
@@ -273,23 +288,16 @@ export default function App() {
           }
         };
 
-        const sRes = await fetch(`${STRAPI_URL}/api/shlokas`, {
+        await fetch(`${STRAPI_URL}/api/shlokas`, {
           method: 'POST',
           headers: getAuthHeaders(),
           body: JSON.stringify(payload)
         });
-
-        if (!sRes.ok) {
-           const sErr = await sRes.json();
-           console.error(`Shloka ${i} failed:`, sErr);
-        }
       }
 
       showNotification(`SUCCESS: Relational hierarchy published.`);
       resetAppSession();
-
     } catch (err) {
-      console.error("Critical Sync Failure:", err);
       showNotification(`Sync Error: ${err.message}`);
     } finally {
       setIsSubmitting(false);
@@ -327,7 +335,7 @@ export default function App() {
              <span className="text-indigo-600 font-black bg-indigo-50 w-12 h-12 flex items-center justify-center rounded-2xl shadow-sm text-xl border">ॐ</span>
              <h1 className="text-2xl font-black text-slate-800 tracking-tighter text-left">Relational Manager</h1>
           </div>
-          <button onClick={() => navigate('#/login')} className="flex items-center gap-2 text-red-500 font-black uppercase tracking-widest text-[10px] bg-red-50 px-5 py-3 rounded-xl hover:bg-red-100 transition-all"><LogOut size={16}/> Logout</button>
+          <button onClick={() => { setUser(null); navigate('#/login'); }} className="flex items-center gap-2 text-red-500 font-black uppercase tracking-widest text-[10px] bg-red-50 px-5 py-3 rounded-xl hover:bg-red-100 transition-all"><LogOut size={16}/> Logout</button>
         </header>
 
         <main className="max-w-6xl mx-auto py-32 px-10">
@@ -377,7 +385,7 @@ export default function App() {
               <button onClick={() => navigate('#/dashboard')} className="p-5 rounded-2xl bg-slate-50 text-slate-400 hover:text-indigo-600 transition-all shadow-inner"><ArrowLeft size={32}/></button>
               <div className="text-left">
                 <h1 className="text-4xl font-black text-slate-900 tracking-tighter text-left">{currentStep === 1 ? 'Manuscript Setup' : 'Node Indexing'}</h1>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 italic text-left">Relational pipeline v2.5</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 italic text-left">Relational pipeline v2.6</p>
               </div>
            </div>
            <div className="flex gap-6">
@@ -393,8 +401,8 @@ export default function App() {
           {currentStep === 1 ? (
             <div className="space-y-16 animate-in fade-in slide-in-from-bottom-12 duration-1000 text-left">
               <div className="grid grid-cols-2 gap-12 text-left">
-                <SelectWithAdd label="Volume Title" options={MOCK_BOOKS_LIST} value={formData.book} onChange={(v) => updateData('book', v)} />
-                <SelectWithAdd label="Bhashya Lineage (Author)" options={['Shankaracharya', 'Ramanujacharya', 'Madhvacharya']} value={formData.bhashya} onChange={(v) => updateData('bhashya', v)} />
+                <SelectWithAdd label="Volume Title" options={booksList} value={formData.book} onChange={(v) => updateData('book', v)} onAdd={handleAddNewBook} />
+                <SelectWithAdd label="Bhashya Lineage (Author)" options={authorsList} value={formData.bhashya} onChange={(v) => updateData('bhashya', v)} onAdd={(v) => handleAddNewAuthor(v, 'bhashya')} />
               </div>
               <div className="grid gap-10 text-left">
                 <div className="space-y-3 text-left">
@@ -417,7 +425,7 @@ export default function App() {
                 <div className="flex items-center justify-between mb-8 text-left">
                   <div className="text-left">
                     <h3 className="text-3xl font-black text-slate-900 tracking-tighter text-left">Hierarchy Structural Depth</h3>
-                    <p className="text-sm text-slate-400 font-bold uppercase mt-1 italic tracking-widest text-left">Define metadata labels for your structural levels.</p>
+                    <p className="text-sm text-slate-400 font-bold uppercase mt-1 italic tracking-widest text-left text-left">Define metadata labels for your structural levels.</p>
                   </div>
                   <div className="flex gap-10 items-center bg-slate-50 p-6 rounded-[3rem] shadow-inner border-2 border-slate-100">
                       <button className="w-16 h-16 bg-white shadow-xl rounded-3xl flex items-center justify-center text-slate-400 hover:text-red-500 transition-all" onClick={() => updateData('hierarchyCount', Math.max(1, formData.hierarchyCount - 1))}><Minus size={32}/></button>
@@ -428,8 +436,8 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-6 text-left">
                   {['level1', 'level2', 'level3', 'level4'].slice(0, formData.hierarchyCount).map((level, idx) => (
                     <div key={level} className="text-left">
-                      <label className="text-xs font-black text-slate-400 uppercase ml-2 block mb-2 tracking-widest text-left">Level {idx+1} Label (Devanagari)</label>
-                      <input type="text" className="w-full p-4 border-2 border-slate-100 rounded-2xl outline-none focus:border-indigo-400 font-serif font-bold text-indigo-900 bg-indigo-50/20" value={formData.hierarchySanskritNames[level]} onChange={(e) => updateNested('hierarchySanskritNames', level, filterDevanagari(e.target.value))} placeholder="e.g. अध्याय" />
+                      <label className="text-xs font-black text-slate-400 uppercase ml-2 block mb-2 tracking-widest text-left">स्तर {idx+1} नाम (उदा. अध्याय)</label>
+                      <input type="text" className="w-full p-4 border-2 border-slate-100 rounded-2xl outline-none focus:border-indigo-400 font-serif font-bold text-indigo-900 bg-indigo-50/20" value={formData.hierarchySanskritNames[level]} onChange={(e) => updateNested('hierarchySanskritNames', level, filterDevanagari(e.target.value))} placeholder="उदा. अध्याय" />
                     </div>
                   ))}
                 </div>
@@ -440,9 +448,9 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-6 text-left">
                   {formData.selectedTeekas.map((teeka, idx) => (
                     <div key={idx} className="flex gap-3 animate-in zoom-in duration-500 text-left">
-                      <SelectWithAdd options={TEEKAS_BY_BOOK.default} value={teeka} onChange={(v) => {
+                      <SelectWithAdd options={authorsList} value={teeka} onChange={(v) => {
                         const newList = [...formData.selectedTeekas]; newList[idx] = v; updateData('selectedTeekas', newList);
-                      }} />
+                      }} onAdd={(v) => handleAddNewAuthor(v, null)} />
                       {formData.selectedTeekas.length > 1 && (
                         <button onClick={() => updateData('selectedTeekas', formData.selectedTeekas.filter((_, i) => i !== idx))} className="bg-red-50 text-red-400 p-4 rounded-2xl hover:bg-red-100 transition-all border-2 border-red-50"><Trash2 size={20} /></button>
                       )}
@@ -450,7 +458,7 @@ export default function App() {
                   ))}
                 </div>
                 <button className="text-[10px] font-black text-indigo-600 flex items-center gap-2 mt-8 bg-indigo-50 px-8 py-4 rounded-2xl hover:bg-indigo-100 transition-all uppercase tracking-widest text-left" onClick={() => updateData('selectedTeekas', [...formData.selectedTeekas, ''])}>
-                  <Plus size={16}/> Add Commentary Slot
+                  <Plus size={16}/> Add Sub-Commentary Slot
                 </button>
               </div>
             </div>
@@ -476,7 +484,7 @@ export default function App() {
               </div>
               <div className="grid gap-12 text-left">
                 <div className="space-y-4 text-left">
-                   <label className="text-xs font-black text-slate-400 uppercase ml-10 tracking-widest text-left">Canonical Translation</label>
+                   <label className="text-xs font-black text-slate-400 uppercase ml-10 tracking-widest text-left">English Translation</label>
                    <textarea rows={3} className="w-full p-10 border-2 border-slate-100 rounded-[3rem] outline-none text-xl font-bold shadow-sm focus:border-indigo-200 transition-all" placeholder="Enter translation..." value={formData.verseTranslations.english} onChange={(e) => updateNested('verseTranslations', 'english', filterEnglish(e.target.value))} />
                 </div>
                 <div className="grid grid-cols-2 gap-12 text-left">
@@ -493,7 +501,7 @@ export default function App() {
               
               <div className="space-y-12 pt-20 border-t-2 text-left">
                 <div className="flex items-center gap-6">
-                   <h3 className="text-4xl font-black text-slate-900 tracking-tighter">Sub-Commentary (Tika) Nodes</h3>
+                   <h3 className="text-4xl font-black text-slate-900 tracking-tighter">Relational Tika Nodes</h3>
                    <div className="px-6 py-2 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-black uppercase border tracking-widest text-left">{formData.teekas.length} Authors Linked</div>
                 </div>
                 {formData.teekas.map((teeka, idx) => (
@@ -537,7 +545,7 @@ export default function App() {
                 const syncedTeekas = formData.selectedTeekas.filter(a => a.trim() !== '').map((a, i) => ({ id: Date.now() + i, name: '', author: a, text: '', englishTranslation: '' }));
                 setFormData(prev => ({ ...prev, teekas: syncedTeekas }));
                 setCurrentStep(2);
-              }} disabled={!formData.book} className="px-16 py-6 bg-indigo-600 text-white rounded-[2rem] flex items-center gap-5 font-black hover:bg-indigo-700 shadow-2xl uppercase tracking-widest text-xs border-b-8 border-indigo-800 transition-all active:scale-95">Next: Transcription <ChevronRight size={24}/></button>
+              }} disabled={!formData.book} className="px-16 py-6 bg-indigo-600 text-white rounded-[2rem] flex items-center gap-5 font-black hover:bg-indigo-700 shadow-2xl uppercase tracking-widest text-xs border-b-8 border-indigo-800 transition-all active:scale-95">Transcription Phase <ChevronRight size={24}/></button>
             ) : (
               <>
                 <button onClick={handleSaveAndNext} disabled={!formData.sourceText.trim() || isSubmitting} className="px-10 py-6 bg-indigo-600 text-white rounded-[2rem] flex items-center gap-4 font-black hover:bg-indigo-700 shadow-2xl uppercase tracking-widest text-xs border-b-8 border-indigo-800 transition-all active:scale-95"><Plus size={26}/> Index Current Node</button>
