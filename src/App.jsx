@@ -147,6 +147,27 @@ const ShlokaPortalManager = ({ onNavigate }) => {
 
   useEffect(() => { fetchDropdownData(); }, []);
 
+  // TARGETED FIX: Fetch existing book description when Volume Title is selected
+  useEffect(() => {
+    const fetchExistingBookIntro = async () => {
+      if (!formData.book || formData.book === '') return;
+      try {
+        const res = await fetch(`${STRAPI_URL}/api/books?filters[Title][$eq]=${formData.book}&fields[0]=description`, { headers: getAuthHeaders() });
+        const data = await res.json();
+        if (data.data?.[0]?.description) {
+          // Convert Strapi blocks (array of objects) back to newline-separated string
+          const plainText = data.data[0].description
+            .map(block => block.children?.map(child => child.text).join('') || "")
+            .join('\n');
+          updateData('bookIntro', plainText);
+        }
+      } catch (err) {
+        console.error("Failed to fetch existing book intro:", err);
+      }
+    };
+    fetchExistingBookIntro();
+  }, [formData.book]);
+
   const showNotification = (msg) => { setNotification(msg); setTimeout(() => setNotification(null), 6000); };
   const updateData = (field, value) => setFormData(prev => ({ ...prev, [field]: value }));
   const updateNested = (parent, field, value) => setFormData(prev => ({ ...prev, [parent]: { ...prev[parent], [field]: value } }));
@@ -207,11 +228,30 @@ const ShlokaPortalManager = ({ onNavigate }) => {
       const bookLookup = await fetch(`${STRAPI_URL}/api/books?filters[Title][$eq]=${formData.book}`, { headers: getAuthHeaders() });
       const bLookupData = await bookLookup.json();
       let bookDocId = bLookupData.data?.[0]?.documentId;
+
+      // TARGETED FIX: Use bookIntro for description when creating or updating
       if (!bookDocId) {
-        const bRes = await fetch(`${STRAPI_URL}/api/books`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ data: { Title: formData.book, description: toStrapiBlocks(formData.bookIntro) } }) });
+        const bRes = await fetch(`${STRAPI_URL}/api/books`, { 
+          method: 'POST', 
+          headers: getAuthHeaders(), 
+          body: JSON.stringify({ 
+            data: { 
+              Title: formData.book, 
+              description: toStrapiBlocks(formData.bookIntro) 
+            } 
+          }) 
+        });
         const bData = await bRes.json();
         bookDocId = bData.data.documentId;
+      } else {
+        // Optional: Update description if book already exists
+        await fetch(`${STRAPI_URL}/api/books/${bookDocId}`, {
+          method: 'PUT',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ data: { description: toStrapiBlocks(formData.bookIntro) } })
+        });
       }
+
       const chapCache = {}; const secCache = {}; 
       for (let i = 0; i < finalQueue.length; i++) {
         const item = finalQueue[i];
@@ -220,6 +260,7 @@ const ShlokaPortalManager = ({ onNavigate }) => {
             const cData = await cRes.json();
             chapCache[item.adhyayTitle] = cData.data.documentId;
         }
+
         let sDocId = null;
         if (item.sectionTitle && item.sectionTitle !== "" && item.sectionTitle !== "0") {
             const key = `${item.adhyayTitle}-${item.sectionTitle}`;
@@ -230,6 +271,7 @@ const ShlokaPortalManager = ({ onNavigate }) => {
             }
             sDocId = secCache[key];
         }
+
         await fetch(`${STRAPI_URL}/api/shlokas`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ data: { ...item, books: bookDocId, chapter: chapCache[item.adhyayTitle], section: sDocId } }) });
       }
       showNotification(`SUCCESS: Sync complete.`);

@@ -137,7 +137,7 @@ export default function ShlokaPortalManager({ onNavigate }) {
       const bLookupData = await bookLookup.json();
       let bookDocId = bLookupData.data?.[0]?.documentId;
       if (!bookDocId) {
-        const bRes = await fetch(`${STRAPI_URL}/api/books`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ data: { Title: formData.book, description: toStrapiBlocks(formData.bookIntro) } }) });
+        const bRes = await fetch(`${STRAPI_URL}/api/books`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ data: { Title: formData.book, description: toStrapiBlocks(formData.description) } }) });
         const bData = await bRes.json();
         bookDocId = bData.data.documentId;
       }
