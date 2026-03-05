@@ -1,12 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Plus, Trash2, ChevronRight, ChevronLeft, Check, Globe, Wand2, 
-  BookOpen, Sparkles, X, CloudUpload, Minus, Database, LogOut, 
-  Search, Edit3, ArrowLeft, LayoutDashboard, FilePlus, Loader2,
-  Book as BookIcon, Type, Languages, MessageSquare, AlertCircle
+  Plus, Trash2, ChevronRight, Check, Languages, 
+  MessageSquare, AlertCircle, Loader2, Book as BookIcon, 
+  Type, Sparkles, ArrowLeft, Minus, CloudUpload 
 } from 'lucide-react';
 
-// --- CONFIGURATION & CONSTANTS ---
 const STRAPI_URL = "http://localhost:1337";
 const STRAPI_API_TOKEN = "5c6b3b5ef3b79a3e8e61ad906060e2ef2502210a6872df54550b83cccee7e1e83ec814a4d72e4f2a0a77447cc6b667e27b4e4b606f11414bb1dd2f05d3e22b59ceefa244e94d85479f18ed794b13956cf5020bdadd2133e21e5010ae57c189b29a3da29d92664622accb575e0245067f8a96c4d4988acc84247dca16a67fdb07"; 
 
@@ -20,82 +18,14 @@ const INITIAL_FORM_STATE = {
   teekas: []
 };
 
-// --- UTILITIES ---
 const filterDevanagari = (val) => val.replace(/[^\u0900-\u097F\s.,;:!?'"|॥०-९\-\n\r()[\]{}@#$%^&*_+=\/\\<>~`|]/g, '');
 const filterEnglish = (val) => val.replace(/[^a-zA-Z0-9\s.,;:!?'"()[\]{}\-\n\r@#$%^&*_+=\/\\<>~`|]/g, '');
 
 const toStrapiBlocks = (text) => {
   if (!text) return [{ type: 'paragraph', children: [{ type: 'text', text: "" }] }];
-  return text.split('\n').map(line => ({
-    type: 'paragraph',
-    children: [{ type: 'text', text: line }]
-  }));
+  return text.split('\n').map(line => ({ type: 'paragraph', children: [{ type: 'text', text: line }] }));
 };
 
-// --- MODULAR COMPONENTS ---
-
-// 1. LOGIN COMPONENT
-const Login = ({ onLogin }) => {
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    onLogin({ email: e.target.email.value });
-  };
-
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-[#FDFBF7] p-4 text-left">
-      <div className="w-full max-w-md bg-white p-12 rounded-[3rem] shadow-2xl border border-indigo-50">
-        <div className="text-center mb-10">
-          <div className="inline-flex items-center gap-4 mb-6">
-            <div className="bg-[#D97706] w-14 h-14 rounded-2xl text-white flex items-center justify-center text-3xl shadow-xl">ॐ</div>
-            <h1 className="text-4xl font-black text-[#D97706] tracking-tighter text-left">Shloka Portal</h1>
-          </div>
-          <p className="text-slate-400 font-black uppercase tracking-widest text-[10px] text-center">Administrative Access Only</p>
-        </div>
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <input name="email" type="text" placeholder="Username" defaultValue="admin@shlokaportal.com" className="w-full p-5 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-[#D97706] transition-all font-bold text-slate-600" />
-          <input name="password" type="password" placeholder="Passkey" defaultValue="123456" className="w-full p-5 bg-slate-50 border-2 border-slate-100 rounded-2xl outline-none focus:border-[#D97706] transition-all font-bold text-slate-600" />
-          <button type="submit" className="w-full py-5 bg-[#D97706] text-white rounded-2xl font-black text-xl hover:bg-orange-700 active:scale-95 shadow-2xl transition-all">Initiate Access</button>
-        </form>
-      </div>
-    </div>
-  );
-};
-
-// 2. DASHBOARD COMPONENT
-const Dashboard = ({ onNavigate, onLogout, onResetWizard }) => (
-  <div className="min-h-screen bg-[#FDFBF7] text-left">
-    <header className="bg-white/80 backdrop-blur-xl border-b border-slate-100 px-12 py-6 flex justify-between items-center sticky top-0 z-50">
-      <div className="flex items-center gap-4 text-left">
-        <span className="text-indigo-600 font-black bg-indigo-50 w-12 h-12 flex items-center justify-center rounded-2xl shadow-sm text-xl border">ॐ</span>
-        <h1 className="text-2xl font-black text-slate-800 tracking-tighter text-left">Relational Manager</h1>
-      </div>
-      <button onClick={onLogout} className="flex items-center gap-2 text-red-500 font-black uppercase tracking-widest text-[10px] bg-red-50 px-5 py-3 rounded-xl hover:bg-red-100 transition-all"><LogOut size={16}/> Logout</button>
-    </header>
-
-    <main className="max-w-6xl mx-auto py-32 px-10 text-left">
-      <div className="text-center mb-24">
-        <h2 className="text-6xl font-black text-slate-900 mb-6 tracking-tighter text-center">Digitization Engine</h2>
-        <p className="text-slate-400 text-lg font-medium text-center">Coordinate relational data population for manuscripts.</p>
-      </div>
-      <div className="grid md:grid-cols-2 gap-12 text-left">
-        <div className="group relative bg-white p-16 rounded-[4rem] border shadow-xl hover:shadow-2xl hover:-translate-y-3 transition-all cursor-pointer overflow-hidden" onClick={() => onNavigate('#/edit-list')}>
-          <div className="absolute -top-10 -right-10 w-48 h-48 bg-orange-50 rounded-full opacity-30 group-hover:scale-150 transition-transform duration-1000"></div>
-          <Edit3 className="text-orange-600 w-20 h-20 mb-10 relative z-10" />
-          <h3 className="text-4xl font-black text-slate-800 mb-6 relative z-10">Modify Existing</h3>
-          <p className="text-slate-400 leading-relaxed text-lg relative z-10 text-left">Adjust existing Shloka records and linked Translation/Commentary components.</p>
-        </div>
-        <div className="group relative bg-white p-16 rounded-[4rem] border shadow-xl hover:shadow-2xl hover:-translate-y-3 transition-all cursor-pointer overflow-hidden" onClick={() => { onResetWizard(); onNavigate('#/add-entry'); }}>
-          <div className="absolute -top-10 -right-10 w-48 h-48 bg-green-50 rounded-full opacity-30 group-hover:scale-150 transition-transform duration-1000"></div>
-          <FilePlus className="text-green-600 w-20 h-20 mb-10 relative z-10" />
-          <h3 className="text-4xl font-black text-slate-800 mb-6 relative z-10">Archive New</h3>
-          <p className="text-slate-400 leading-relaxed text-lg relative z-10 text-left">Deploy a fresh relational volume tree including Author, Book, and Shlokas.</p>
-        </div>
-      </div>
-    </main>
-  </div>
-);
-
-// 3. UI SHARED: SELECT WITH ADD
 const SelectWithAdd = ({ label, options, value, onChange, onAdd, placeholder = "Select...", disabled = false }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [newValue, setNewValue] = useState('');
@@ -105,12 +35,12 @@ const SelectWithAdd = ({ label, options, value, onChange, onAdd, placeholder = "
       {label && <label className="text-sm font-black text-slate-600 mb-1 uppercase tracking-tighter">{label}</label>}
       {isAdding ? (
         <div className="flex items-center space-x-2 animate-in fade-in duration-200">
-          <input type="text" className="flex-1 p-3 border-2 border-indigo-100 rounded-xl outline-none text-sm focus:border-indigo-500" value={newValue} onChange={(e) => setNewValue(e.target.value)} autoFocus />
+          <input type="text" className="flex-1 p-3 border-2 border-indigo-100 rounded-xl outline-none text-sm" value={newValue} onChange={(e) => setNewValue(e.target.value)} autoFocus />
           <button onClick={handleAdd} className="p-3 bg-indigo-600 text-white rounded-xl shadow-md hover:bg-indigo-700 transition-colors"><Check size={18} /></button>
           <button onClick={() => setIsAdding(false)} className="text-xs text-slate-400 font-bold uppercase px-2">Cancel</button>
         </div>
       ) : (
-        <select className="p-3 border-2 border-slate-100 rounded-xl bg-white disabled:bg-slate-50 text-sm outline-none focus:border-indigo-500 transition-all font-bold text-slate-700" value={value} disabled={disabled} onChange={(e) => e.target.value === '__ADD_NEW__' ? setIsAdding(true) : onChange(e.target.value)}>
+        <select className="p-3 border-2 border-slate-100 rounded-xl bg-white disabled:bg-slate-50 text-sm outline-none font-bold text-slate-700" value={value} disabled={disabled} onChange={(e) => e.target.value === '__ADD_NEW__' ? setIsAdding(true) : onChange(e.target.value)}>
           <option value="" disabled>{placeholder}</option>
           {options.map(opt => <option key={opt.id || opt.name || opt} value={opt.name || opt}>{opt.name || opt}</option>)}
           <option value="__ADD_NEW__" className="text-indigo-600 font-black">+ Create New Entry</option>
@@ -120,8 +50,7 @@ const SelectWithAdd = ({ label, options, value, onChange, onAdd, placeholder = "
   );
 };
 
-// 4. MAIN WIZARD ENGINE
-const ShlokaPortalManager = ({ onNavigate }) => {
+export default function ShlokaPortalManager({ onNavigate }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [notification, setNotification] = useState(null);
   const [versesQueue, setVersesQueue] = useState([]); 
@@ -239,11 +168,8 @@ const ShlokaPortalManager = ({ onNavigate }) => {
 
   return (
     <div className="min-h-screen bg-slate-50 py-16 px-8 font-sans text-slate-900 leading-normal text-left">
-      {notification && <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[200] bg-indigo-950 text-white px-10 py-5 rounded-[2rem] shadow-2xl flex items-center gap-4 border-2 border-indigo-500/20 backdrop-blur-xl">
-        <AlertCircle size={18}/><span>{notification}</span></div>}
-      
-      {isSubmitting && <div className="fixed inset-0 z-[300] bg-indigo-950/60 backdrop-blur-2xl flex flex-col items-center justify-center text-white p-10 text-center">
-        <Loader2 className="w-24 h-24 text-white animate-spin mb-10 opacity-80" /><h2 className="text-6xl font-black tracking-tighter mb-4 text-center">Relational Tree Sync</h2></div>}
+      {notification && <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[200] bg-indigo-950 text-white px-10 py-5 rounded-[2rem] shadow-2xl flex items-center gap-4 border-2 border-indigo-500/20 backdrop-blur-xl"><AlertCircle size={18}/><span>{notification}</span></div>}
+      {isSubmitting && <div className="fixed inset-0 z-[300] bg-indigo-950/60 backdrop-blur-2xl flex flex-col items-center justify-center text-white p-10 text-center"><Loader2 className="w-24 h-24 text-white animate-spin mb-10 opacity-80" /><h2 className="text-6xl font-black tracking-tighter mb-4 text-center">Relational Tree Sync</h2></div>}
 
       <div className="max-w-5xl mx-auto space-y-10">
         <div className="bg-white p-10 rounded-[3.5rem] shadow-2xl border border-slate-100 flex items-center justify-between text-left">
@@ -251,9 +177,7 @@ const ShlokaPortalManager = ({ onNavigate }) => {
               <button onClick={() => onNavigate('#/dashboard')} className="p-5 rounded-2xl bg-slate-50 text-slate-400 hover:text-indigo-600 transition-all shadow-inner"><ArrowLeft size={32}/></button>
               <div className="text-left"><h1 className="text-4xl font-black text-slate-900 tracking-tighter text-left">{currentStep === 1 ? 'Manuscript Setup' : 'Node Indexing'}</h1><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2 italic text-left">Relational pipeline v2.6</p></div>
            </div>
-           <div className="flex gap-6">
-              {[1, 2].map(s => (<div key={s} className={`w-16 h-16 rounded-2xl flex items-center justify-center font-black text-2xl transition-all duration-1000 ${currentStep >= s ? 'bg-indigo-600 text-white shadow-2xl shadow-indigo-500/40' : 'bg-slate-100 text-slate-300'}`}>{s === 1 ? <BookIcon size={32}/> : <Type size={32}/>}</div>))}
-           </div>
+           <div className="flex gap-6">{[1, 2].map(s => (<div key={s} className={`w-16 h-16 rounded-2xl flex items-center justify-center font-black text-2xl transition-all duration-1000 ${currentStep >= s ? 'bg-indigo-600 text-white shadow-2xl shadow-indigo-500/40' : 'bg-slate-100 text-slate-300'}`}>{s === 1 ? <BookIcon size={32}/> : <Type size={32}/>}</div>))}</div>
         </div>
 
         <div className="bg-white p-20 rounded-[5rem] shadow-2xl border min-h-[800px] relative overflow-hidden text-left">
@@ -282,15 +206,8 @@ const ShlokaPortalManager = ({ onNavigate }) => {
 
               <div className="pt-16 border-t-2 border-slate-50 text-left">
                 <div className="flex items-center justify-between mb-8 text-left">
-                  <div className="text-left">
-                    <h3 className="text-3xl font-black text-slate-900 tracking-tighter text-left">Hierarchy Structural Depth</h3>
-                    <p className="text-sm text-slate-400 font-bold uppercase mt-1 italic tracking-widest text-left text-left">Define metadata labels for your structural levels.</p>
-                  </div>
-                  <div className="flex gap-10 items-center bg-slate-50 p-6 rounded-[3rem] shadow-inner border-2 border-slate-100">
-                      <button className="w-16 h-16 bg-white shadow-xl rounded-3xl flex items-center justify-center text-slate-400 hover:text-red-500 transition-all" onClick={() => updateData('hierarchyCount', Math.max(1, formData.hierarchyCount - 1))}><Minus size={32}/></button>
-                      <span className="text-6xl font-black text-indigo-600 min-w-[5rem] text-center">{formData.hierarchyCount}</span>
-                      <button className="w-16 h-16 bg-white shadow-xl rounded-3xl flex items-center justify-center text-slate-400 hover:text-green-500 transition-all" onClick={() => updateData('hierarchyCount', Math.min(4, formData.hierarchyCount + 1))}><Plus size={32}/></button>
-                  </div>
+                  <div className="text-left"><h3 className="text-3xl font-black text-slate-900 tracking-tighter text-left">Hierarchy Structural Depth</h3><p className="text-sm text-slate-400 font-bold uppercase mt-1 italic tracking-widest text-left">Define metadata labels for your structural levels.</p></div>
+                  <div className="flex gap-10 items-center bg-slate-50 p-6 rounded-[3rem] shadow-inner border-2 border-slate-100"><button className="w-16 h-16 bg-white shadow-xl rounded-3xl flex items-center justify-center text-slate-400 hover:text-red-500 transition-all" onClick={() => updateData('hierarchyCount', Math.max(1, formData.hierarchyCount - 1))}><Minus size={32}/></button><span className="text-6xl font-black text-indigo-600 min-w-[5rem] text-center">{formData.hierarchyCount}</span><button className="w-16 h-16 bg-white shadow-xl rounded-3xl flex items-center justify-center text-slate-400 hover:text-green-500 transition-all" onClick={() => updateData('hierarchyCount', Math.min(4, formData.hierarchyCount + 1))}><Plus size={32}/></button></div>
                 </div>
                 <div className="grid grid-cols-2 gap-6 text-left">
                   {['level1', 'level2', 'level3', 'level4'].slice(0, formData.hierarchyCount).map((level, idx) => (
@@ -301,22 +218,17 @@ const ShlokaPortalManager = ({ onNavigate }) => {
                   ))}
                 </div>
               </div>
-
               <div className="pt-16 border-t-2 border-slate-50 text-left">
                 <h3 className="text-xs font-black mb-8 uppercase tracking-[0.2em] text-slate-400 flex items-center gap-3 text-left"><Languages size={20}/> Tika Allocations</h3>
                 <div className="grid grid-cols-2 gap-6 text-left">
                   {formData.selectedTeekas.map((teeka, idx) => (
                     <div key={idx} className="flex gap-3 animate-in zoom-in duration-500 text-left">
                       <SelectWithAdd options={authorsList} value={teeka} onChange={(v) => { const newList = [...formData.selectedTeekas]; newList[idx] = v; updateData('selectedTeekas', newList); }} onAdd={(v) => handleAddNewAuthor(v, null)} />
-                      {formData.selectedTeekas.length > 1 && (
-                        <button onClick={() => updateData('selectedTeekas', formData.selectedTeekas.filter((_, i) => i !== idx))} className="bg-red-50 text-red-400 p-4 rounded-2xl hover:bg-red-100 transition-all border-2 border-red-50"><Trash2 size={20} /></button>
-                      )}
+                      {formData.selectedTeekas.length > 1 && (<button onClick={() => updateData('selectedTeekas', formData.selectedTeekas.filter((_, i) => i !== idx))} className="bg-red-50 text-red-400 p-4 rounded-2xl hover:bg-red-100 transition-all border-2 border-red-50"><Trash2 size={20} /></button>)}
                     </div>
                   ))}
                 </div>
-                <button className="text-[10px] font-black text-indigo-600 flex items-center gap-2 mt-8 bg-indigo-50 px-8 py-4 rounded-2xl hover:bg-indigo-100 transition-all uppercase tracking-widest text-left" onClick={() => updateData('selectedTeekas', [...formData.selectedTeekas, ''])}>
-                  <Plus size={16}/> Add Sub-Commentary Slot
-                </button>
+                <button className="text-[10px] font-black text-indigo-600 flex items-center gap-2 mt-8 bg-indigo-50 px-8 py-4 rounded-2xl hover:bg-indigo-100 transition-all uppercase tracking-widest text-left" onClick={() => updateData('selectedTeekas', [...formData.selectedTeekas, ''])}><Plus size={16}/> Add Sub-Commentary Slot</button>
               </div>
             </div>
           ) : (
@@ -368,37 +280,4 @@ const ShlokaPortalManager = ({ onNavigate }) => {
       </div>
     </div>
   );
-};
-
-// 5. MAIN ROUTER
-export default function App() {
-  const [route, setRoute] = useState(window.location.hash || '#/login');
-  const [user, setUser] = useState(null);
-
-  useEffect(() => {
-    const handleHashChange = () => setRoute(window.location.hash);
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
-  }, []);
-
-  const navigate = (hash) => { window.location.hash = hash; };
-
-  const renderView = () => {
-    if (!user || route === '#/login') {
-      return <Login onLogin={(userData) => { setUser(userData); navigate('#/dashboard'); }} />;
-    }
-
-    switch (route) {
-      case '#/dashboard':
-        return <Dashboard onNavigate={navigate} onLogout={() => { setUser(null); navigate('#/login'); }} onResetWizard={() => {}} />;
-      case '#/add-entry':
-        return <ShlokaPortalManager onNavigate={navigate} />;
-      case '#/edit-list':
-        return <ShlokaPortalManager onNavigate={navigate} />; 
-      default:
-        return <Dashboard onNavigate={navigate} onLogout={() => setUser(null)} />;
-    }
-  };
-
-  return <div className="min-h-screen font-sans">{renderView()}</div>;
 }
