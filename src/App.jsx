@@ -90,7 +90,7 @@ const Dashboard = ({ onNavigate, onLogout, onResetWizard }) => (
         <div className="group relative bg-white p-16 rounded-[4rem] border shadow-xl hover:shadow-2xl hover:-translate-y-3 transition-all cursor-pointer overflow-hidden" onClick={() => { onResetWizard(); onNavigate('#/add-entry'); }}>
           <div className="absolute -top-10 -right-10 w-48 h-48 bg-green-50 rounded-full opacity-30 group-hover:scale-150 transition-transform duration-1000"></div>
           <FilePlus className="text-green-600 w-20 h-20 mb-10 relative z-10" />
-          <h3 className="text-4xl font-black text-slate-800 mb-6 relative z-10">Archive New</h3>
+          <h3 className="text-4xl font-black text-slate-800 mb-6 relative z-10">Add New</h3>
           <p className="text-slate-400 leading-relaxed text-lg relative z-10 text-left">Deploy a fresh relational volume tree including Author, Book, and Shlokas.</p>
         </div>
       </div>
