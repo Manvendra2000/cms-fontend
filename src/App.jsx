@@ -254,6 +254,10 @@ const handleAddNewCategory = async (newName) => {
       const bLookupData = await bookLookup.json();
       let bookDocId = bLookupData.data?.[0]?.documentId;
 
+      // Find category ID from selected category name
+      const selectedCategory = categoriesList.find(c => c.name === formData.category);
+      const categoryId = selectedCategory?.id || null;
+
       // TARGETED FIX: Included shankaracharyaIntro and shankaracharyaIntroTranslation in book data
       if (!bookDocId) {
         const bRes = await fetch(`${STRAPI_URL}/api/books`, { 
@@ -264,7 +268,8 @@ const handleAddNewCategory = async (newName) => {
               Title: formData.book, 
               description: toStrapiBlocks(formData.bookIntro),
               shankaracharyaIntro: formData.shankaracharyaIntro,
-              shankaracharyaIntroTranslation: formData.shankaracharyaIntroTranslation
+              shankaracharyaIntroTranslation: formData.shankaracharyaIntroTranslation,
+              category: categoryId
             } 
           }) 
         });
@@ -278,7 +283,8 @@ const handleAddNewCategory = async (newName) => {
             data: { 
               description: toStrapiBlocks(formData.bookIntro),
               shankaracharyaIntro: formData.shankaracharyaIntro,
-              shankaracharyaIntroTranslation: formData.shankaracharyaIntroTranslation
+              shankaracharyaIntroTranslation: formData.shankaracharyaIntroTranslation,
+              category: categoryId
             } 
           })
         });
