@@ -5,7 +5,7 @@ const Dashboard = ({ onNavigate, onLogout, onResetWizard }) => (
   <div className="min-h-screen bg-[#FDFBF7] text-left">
     <header className="bg-white/80 backdrop-blur-xl border-b border-slate-100 px-12 py-6 flex justify-between items-center sticky top-0 z-50">
       <div className="flex items-center gap-4 text-left">
-        <span className="text-indigo-600 font-black bg-indigo-50 w-12 h-12 flex items-center justify-center rounded-2xl shadow-sm text-xl border">ॐ</span>
+        <span className="text-orange-600 font-black bg-orange-50 w-12 h-12 flex items-center justify-center rounded-2xl shadow-sm text-xl border">ॐ</span>
         <h1 className="text-2xl font-black text-slate-800 tracking-tighter text-left">Relational Manager</h1>
       </div>
       <button onClick={onLogout} className="flex items-center gap-2 text-red-500 font-black uppercase tracking-widest text-[10px] bg-red-50 px-5 py-3 rounded-xl hover:bg-red-100 transition-all"><LogOut size={16}/> Logout</button>

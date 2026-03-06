@@ -133,7 +133,7 @@ const BookManager = ({ onNavigate }) => {
           <button onClick={() => onNavigate('#/dashboard')} className="p-3 rounded-xl bg-slate-50 text-slate-400 hover:text-indigo-600 transition-all">
             <ArrowLeft size={20} />
           </button>
-          <span className="text-indigo-600 font-black bg-indigo-50 w-10 h-10 flex items-center justify-center rounded-xl shadow-sm text-lg border">ॐ</span>
+          <span className="text-orange-600 font-black bg-orange-50 w-10 h-10 flex items-center justify-center rounded-xl shadow-sm text-lg border">ॐ</span>
           <h1 className="text-xl font-black text-slate-800 tracking-tighter text-left">Book Manager</h1>
         </div>
       </header>
