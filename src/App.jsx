@@ -11,13 +11,16 @@ const STRAPI_URL = "http://localhost:1337";
 const STRAPI_API_TOKEN = "5c6b3b5ef3b79a3e8e61ad906060e2ef2502210a6872df54550b83cccee7e1e83ec814a4d72e4f2a0a77447cc6b667e27b4e4b606f11414bb1dd2f05d3e22b59ceefa244e94d85479f18ed794b13956cf5020bdadd2133e21e5010ae57c189b29a3da29d92664622accb575e0245067f8a96c4d4988acc84247dca16a67fdb07"; 
 
 const INITIAL_FORM_STATE = {
-  book: '', bookIntro: '', shankaracharyaIntro: '', shankaracharyaIntroTranslation: '', bhashya: '',
+  book: '', category: '', bookIntro: '', shankaracharyaIntro: '', // Added category
+  shankaracharyaIntroTranslation: '', bhashya: '',
   selectedTeekas: [''], hierarchyCount: 2,
   hierarchySanskritNames: { level1: 'अध्याय', level2: 'श्लोक', level3: 'प्रकरण', level4: 'पद' },
   hierarchyValues: { level1: '1', level2: '1', level3: '1', level4: '' },
   sourceText: '', verseTranslations: { english: '', others: [] },
   bhashyaContent: { sanskrit: '', english: '', others: [] },
   teekas: []
+
+
 };
 
 // --- UTILITIES ---
@@ -132,41 +135,63 @@ const ShlokaPortalManager = ({ onNavigate }) => {
 
   const getAuthHeaders = () => ({ 'Content-Type': 'application/json', 'Authorization': `Bearer ${STRAPI_API_TOKEN}` });
 
-  const fetchDropdownData = async () => {
-    try {
-      const [booksRes, authorsRes] = await Promise.all([
-        fetch(`${STRAPI_URL}/api/books?fields[0]=Title&pagination[limit]=100`, { headers: getAuthHeaders() }),
-        fetch(`${STRAPI_URL}/api/authors?fields[0]=name&pagination[limit]=100`, { headers: getAuthHeaders() })
-      ]);
-      const booksData = await booksRes.json();
-      const authorsData = await authorsRes.json();
-      if (booksData.data) setBooksList(booksData.data.map(b => ({ id: b.documentId, name: b.Title })));
-      if (authorsData.data) setAuthorsList(authorsData.data.map(a => ({ id: a.documentId, name: a.name })));
-    } catch (err) { console.error(err); }
-  };
+// Inside ShlokaPortalManager component:
+const [categoriesList, setCategoriesList] = useState([]); // Add this state
+
+// Update fetchDropdownData to include categories
+const fetchDropdownData = async () => {
+  try {
+    const [booksRes, authorsRes, categoriesRes] = await Promise.all([
+      fetch(`${STRAPI_URL}/api/books?fields[0]=Title&pagination[limit]=100`, { headers: getAuthHeaders() }),
+      fetch(`${STRAPI_URL}/api/authors?fields[0]=name&pagination[limit]=100`, { headers: getAuthHeaders() }),
+      fetch(`${STRAPI_URL}/api/categories?fields[0]=Name&pagination[limit]=100`, { headers: getAuthHeaders() }) // Fetch categories
+    ]);
+    const booksData = await booksRes.json();
+    const authorsData = await authorsRes.json();
+    const categoriesData = await categoriesRes.json();
+    
+    if (booksData.data) setBooksList(booksData.data.map(b => ({ id: b.documentId, name: b.Title })));
+    if (authorsData.data) setAuthorsList(authorsData.data.map(a => ({ id: a.documentId, name: a.name })));
+    if (categoriesData.data) setCategoriesList(categoriesData.data.map(c => ({ id: c.documentId, name: c.Name }))); // Map Name field
+  } catch (err) { console.error(err); }
+};
 
   useEffect(() => { fetchDropdownData(); }, []);
 
-  // TARGETED FIX: Fetch existing book description when Volume Title is selected
-  useEffect(() => {
-    const fetchExistingBookIntro = async () => {
-      if (!formData.book || formData.book === '') return;
-      try {
-        const res = await fetch(`${STRAPI_URL}/api/books?filters[Title][$eq]=${formData.book}&fields[0]=description`, { headers: getAuthHeaders() });
-        const data = await res.json();
-        if (data.data?.[0]?.description) {
-          // Convert Strapi blocks (array of objects) back to newline-separated string
-          const plainText = data.data[0].description
-            .map(block => block.children?.map(child => child.text).join('') || "")
-            .join('\n');
-          updateData('bookIntro', plainText);
-        }
-      } catch (err) {
-        console.error("Failed to fetch existing book intro:", err);
+  // Fetch existing book description and intro fields when Volume Title is selected
+ // Update the Book Fetching useEffect to pull the existing category
+useEffect(() => {
+  const fetchExistingBookIntro = async () => {
+    if (!formData.book || formData.book === '') return;
+    try {
+      // Added populate[category] to the query
+      const res = await fetch(`${STRAPI_URL}/api/books?filters[Title][$eq]=${formData.book}&fields[0]=description&fields[1]=shankaracharyaIntro&fields[2]=shankaracharyaIntroTranslation&populate[category][fields][0]=Name`, { headers: getAuthHeaders() });
+      const data = await res.json();
+      const book = data.data?.[0];
+      if (book) {
+        // ... existing logic for description/intro ...
+        
+        // TARGETED FIX: Auto-select category if it exists
+        if (book.category?.Name) updateData('category', book.category.Name);
       }
-    };
-    fetchExistingBookIntro();
-  }, [formData.book]);
+    } catch (err) { console.error("Failed to fetch existing book data:", err); }
+  };
+  fetchExistingBookIntro();
+}, [formData.book]);
+
+// Add handler for creating new categories on the fly
+const handleAddNewCategory = async (newName) => {
+  const res = await fetch(`${STRAPI_URL}/api/categories`, { 
+    method: 'POST', 
+    headers: getAuthHeaders(), 
+    body: JSON.stringify({ data: { Name: newName } }) 
+  });
+  if (res.ok) { 
+    await fetchDropdownData(); 
+    updateData('category', newName); 
+    showNotification(`Category "${newName}" added.`); 
+  }
+};
 
   const showNotification = (msg) => { setNotification(msg); setTimeout(() => setNotification(null), 6000); };
   const updateData = (field, value) => setFormData(prev => ({ ...prev, [field]: value }));
@@ -229,7 +254,7 @@ const ShlokaPortalManager = ({ onNavigate }) => {
       const bLookupData = await bookLookup.json();
       let bookDocId = bLookupData.data?.[0]?.documentId;
 
-      // TARGETED FIX: Use bookIntro for description when creating or updating
+      // TARGETED FIX: Included shankaracharyaIntro and shankaracharyaIntroTranslation in book data
       if (!bookDocId) {
         const bRes = await fetch(`${STRAPI_URL}/api/books`, { 
           method: 'POST', 
@@ -237,18 +262,25 @@ const ShlokaPortalManager = ({ onNavigate }) => {
           body: JSON.stringify({ 
             data: { 
               Title: formData.book, 
-              description: toStrapiBlocks(formData.bookIntro) 
+              description: toStrapiBlocks(formData.bookIntro),
+              shankaracharyaIntro: formData.shankaracharyaIntro,
+              shankaracharyaIntroTranslation: formData.shankaracharyaIntroTranslation
             } 
           }) 
         });
         const bData = await bRes.json();
         bookDocId = bData.data.documentId;
       } else {
-        // Optional: Update description if book already exists
         await fetch(`${STRAPI_URL}/api/books/${bookDocId}`, {
           method: 'PUT',
           headers: getAuthHeaders(),
-          body: JSON.stringify({ data: { description: toStrapiBlocks(formData.bookIntro) } })
+          body: JSON.stringify({ 
+            data: { 
+              description: toStrapiBlocks(formData.bookIntro),
+              shankaracharyaIntro: formData.shankaracharyaIntro,
+              shankaracharyaIntroTranslation: formData.shankaracharyaIntroTranslation
+            } 
+          })
         });
       }
 
@@ -301,15 +333,20 @@ const ShlokaPortalManager = ({ onNavigate }) => {
         <div className="bg-white p-20 rounded-[5rem] shadow-2xl border min-h-[800px] relative overflow-hidden text-left">
           {currentStep === 1 ? (
             <div className="space-y-16 animate-in fade-in slide-in-from-bottom-12 duration-1000 text-left">
-              <div className="grid grid-cols-2 gap-12 text-left">
-                <SelectWithAdd label="Volume Title" options={booksList} value={formData.book} onChange={(v) => updateData('book', v)} onAdd={handleAddNewBook} />
-                <SelectWithAdd label="Bhashya Lineage (Author)" options={authorsList} value={formData.bhashya} onChange={(v) => updateData('bhashya', v)} onAdd={(v) => handleAddNewAuthor(v, 'bhashya')} />
-              </div>
               <div className="grid gap-10 text-left">
+                
+
+                {/* Inside currentStep === 1 block */}
+                <div className="grid grid-cols-3 gap-12 text-left"> {/* Changed grid-cols-2 to 3 */}
+                  <SelectWithAdd label="Category" options={categoriesList} value={formData.category} onChange={(v) => updateData('category', v)} onAdd={handleAddNewCategory} placeholder="Select Category..." />
+                  <SelectWithAdd label="Volume Title" options={booksList} value={formData.book} onChange={(v) => updateData('book', v)} onAdd={handleAddNewBook} />
+                  <SelectWithAdd label="Bhashya Lineage (Author)" options={authorsList} value={formData.bhashya} onChange={(v) => updateData('bhashya', v)} onAdd={(v) => handleAddNewAuthor(v, 'bhashya')} />
+                </div>
                 <div className="space-y-3 text-left">
                    <label className="text-xs font-black text-slate-400 uppercase ml-6 block text-left">Book Description</label>
                    <textarea rows={4} className="w-full p-8 bg-slate-50 border-2 rounded-[2.5rem] outline-none text-sm font-bold shadow-inner" placeholder="Archival context..." value={formData.bookIntro} onChange={(e) => updateData('bookIntro', e.target.value)} />
                 </div>
+
                 <div className="grid grid-cols-2 gap-10 text-left">
                   <div className="space-y-3 text-left">
                     <label className="text-xs font-black text-indigo-400 uppercase ml-6 tracking-widest block text-left">Sanskrit Prologue</label>
