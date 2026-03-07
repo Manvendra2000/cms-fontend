@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, BookOpen, Edit3, ChevronRight, Loader2 } from 'lucide-react';
 import { STRAPI_URL, STRAPI_API_TOKEN } from '../utils/constants';
+import ShlokaList from "./ShlokaList";
 
 const BookManager = ({ onNavigate }) => {
   const [books, setBooks] = useState([]);
@@ -133,7 +134,7 @@ const BookManager = ({ onNavigate }) => {
           <button onClick={() => onNavigate('#/dashboard')} className="p-3 rounded-xl bg-slate-50 text-slate-400 hover:text-indigo-600 transition-all">
             <ArrowLeft size={20} />
           </button>
-          <span className="text-orange-600 font-black bg-orange-50 w-10 h-10 flex items-center justify-center rounded-xl shadow-sm text-lg border">ॐ</span>
+          <span className="text-indigo-600 font-black bg-indigo-50 w-10 h-10 flex items-center justify-center rounded-xl shadow-sm text-lg border">ॐ</span>
           <h1 className="text-xl font-black text-slate-800 tracking-tighter text-left">Book Manager</h1>
         </div>
       </header>
@@ -266,6 +267,15 @@ const BookManager = ({ onNavigate }) => {
                                   {expandedSections.has(section.id) && (
                                     <div className="ml-4 mt-2 p-2 bg-white border rounded">
                                       <div className="text-xs text-slate-500 mb-2">Shlokas in this section:</div>
+                                      <div style={{ padding: "10px" }}>
+
+                                      <div style={{ marginBottom: "10px", fontWeight: "500" }}>
+                                        Shlokas in this section:
+                                      </div>
+
+                                      <ShlokaList sectionId={section.id} />
+
+                                    </div>
                                       {chapter.shlokas
                                         .filter(shloka => shloka.section === section.id)
                                         .map(shloka => (
