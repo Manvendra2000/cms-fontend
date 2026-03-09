@@ -11,6 +11,7 @@ import SelectWithAdd from './SelectWithAdd';
 
 const ShlokaPortalManager = ({ onNavigate }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [duplicateWarning, setDuplicateWarning] = useState(null); // { verses: [], onProceed, onCancel }
   const [notification, setNotification] = useState(null);
   const [versesQueue, setVersesQueue] = useState([]); 
   const [currentStep, setCurrentStep] = useState(1);
@@ -106,6 +107,30 @@ const ShlokaPortalManager = ({ onNavigate }) => {
     showNotification(`Node cached locally.`);
   };
 
+  // Extracted submit loop — called after duplicate check resolves
+  const submitQueue = async (queue, bookDocId, findOrCreateChapter, findOrCreateSection) => {
+    for (const item of queue) {
+      const chapterDocId = await findOrCreateChapter(item.adhyayTitle);
+      let sDocId = null;
+      if (item.sectionTitle && item.sectionTitle !== "" && item.sectionTitle !== "0") {
+        sDocId = await findOrCreateSection(item.adhyayTitle, item.sectionTitle, chapterDocId);
+      }
+      const { adhyayTitle, khandaTitle, sectionTitle, ...shlokaFields } = item;
+      await fetch(`${STRAPI_URL}/api/shlokas`, {
+        method: 'POST', headers: getAuthHeaders(),
+        body: JSON.stringify({ data: {
+          ...shlokaFields,
+          books:   { connect: [bookDocId] },
+          chapter: { connect: [chapterDocId] },
+          ...(sDocId ? { section: { connect: [sDocId] } } : {}),
+        }})
+      });
+    }
+    showNotification('SUCCESS: Sync complete.');
+    setVersesQueue([]);
+    setFormData({...INITIAL_FORM_STATE});
+  };
+
   const handleFinishAndSubmit = async () => {
     let finalQueue = [...versesQueue];
     if (formData.sourceText.trim()) {
@@ -163,60 +188,134 @@ const ShlokaPortalManager = ({ onNavigate }) => {
         });
       }
 
-      const chapCache = {}; const secCache = {};
-      for (let i = 0; i < finalQueue.length; i++) {
-        const item = finalQueue[i];
+      // ── FIND-OR-CREATE: chapters ─────────────────────────────────────────────
+      // Silently reuse existing chapters/sections rather than creating duplicates.
+      const chapCache = {};
+      const secCache  = {};
 
-        // Strapi 5 requires relations as { connect: [documentId] }, not bare strings.
-        // --- CHAPTER ---
-        if (!chapCache[item.adhyayTitle]) {
-          const cRes = await fetch(`${STRAPI_URL}/api/chapters`, {
-            method: 'POST', headers: getAuthHeaders(),
-            body: JSON.stringify({ data: {
-              Title: `${formData.hierarchySanskritNames.level1} ${item.adhyayTitle}`,
-              Chapter_Number: parseInt(item.adhyayTitle) || 1,
-              book: { connect: [bookDocId] },
-            }})
-          });
-          const cData = await cRes.json();
-          if (!cData.data) throw new Error(`Chapter creation failed: ${JSON.stringify(cData.error)}`);
-          chapCache[item.adhyayTitle] = cData.data.documentId;
+      const findOrCreateChapter = async (adhyayTitle) => {
+        if (chapCache[adhyayTitle]) return chapCache[adhyayTitle];
+        const chNum = parseInt(adhyayTitle) || 1;
+        // Check if chapter already exists for this book + number
+        const existing = await fetch(
+          `${STRAPI_URL}/api/shlokas?filters[books][documentId][$eq]=${bookDocId}` +
+          `&filters[section][chapter][Chapter_Number][$eq]=${chNum}` +
+          `&fields[0]=Verse_Number&populate[section][populate][chapter][fields][0]=documentId&populate[section][populate][chapter][fields][1]=Chapter_Number&pagination[limit]=1`,
+          { headers: getAuthHeaders() }
+        );
+        const exData = await existing.json();
+        const existingChDocId = exData.data?.[0]?.section?.chapter?.documentId;
+        if (existingChDocId) {
+          chapCache[adhyayTitle] = existingChDocId;
+          return existingChDocId;
         }
-
-        // --- SECTION ---
-        let sDocId = null;
-        if (item.sectionTitle && item.sectionTitle !== "" && item.sectionTitle !== "0") {
-          const key = `${item.adhyayTitle}-${item.sectionTitle}`;
-          if (!secCache[key]) {
-            const sRes = await fetch(`${STRAPI_URL}/api/sections`, {
-              method: 'POST', headers: getAuthHeaders(),
-              body: JSON.stringify({ data: {
-                Title: `${formData.hierarchySanskritNames.level3} ${item.sectionTitle}`,
-                Section_Number: parseInt(item.sectionTitle) || 1,
-                chapter: { connect: [chapCache[item.adhyayTitle]] },
-              }})
-            });
-            const sData = await sRes.json();
-            if (sData.data) secCache[key] = sData.data.documentId;
-          }
-          sDocId = secCache[key];
-        }
-
-        // --- SHLOKA ---
-        // Strip flat title helper fields; pass all relations via connect syntax.
-        const { adhyayTitle, khandaTitle, sectionTitle, ...shlokaFields } = item;
-        await fetch(`${STRAPI_URL}/api/shlokas`, {
+        // Not found — create fresh
+        const cRes = await fetch(`${STRAPI_URL}/api/chapters`, {
           method: 'POST', headers: getAuthHeaders(),
           body: JSON.stringify({ data: {
-            ...shlokaFields,
-            books:   { connect: [bookDocId] },
-            chapter: { connect: [chapCache[item.adhyayTitle]] },
-            ...(sDocId ? { section: { connect: [sDocId] } } : {}),
+            Title: `${formData.hierarchySanskritNames.level1} ${adhyayTitle}`,
+            Chapter_Number: chNum,
+            book: { connect: [bookDocId] },
           }})
         });
+        const cData = await cRes.json();
+        if (!cData.data) throw new Error(`Chapter creation failed: ${JSON.stringify(cData.error)}`);
+        chapCache[adhyayTitle] = cData.data.documentId;
+        return cData.data.documentId;
+      };
+
+      // ── FIND-OR-CREATE: sections ──────────────────────────────────────────
+      const findOrCreateSection = async (adhyayTitle, sectionTitle, chapterDocId) => {
+        const key = `${adhyayTitle}-${sectionTitle}`;
+        if (secCache[key]) return secCache[key];
+        const secNum = parseInt(sectionTitle) || 1;
+        // Check if section already exists under this chapter
+        const existing = await fetch(
+          `${STRAPI_URL}/api/sections` +
+          `?filters[chapter][documentId][$eq]=${chapterDocId}` +
+          `&filters[Section_Number][$eq]=${secNum}` +
+          `&fields[0]=documentId&pagination[limit]=1`,
+          { headers: getAuthHeaders() }
+        );
+        const exData = await existing.json();
+        const existingSecDocId = exData.data?.[0]?.documentId;
+        if (existingSecDocId) {
+          secCache[key] = existingSecDocId;
+          return existingSecDocId;
+        }
+        // Not found — create fresh
+        const sRes = await fetch(`${STRAPI_URL}/api/sections`, {
+          method: 'POST', headers: getAuthHeaders(),
+          body: JSON.stringify({ data: {
+            Title: `${formData.hierarchySanskritNames.level3} ${sectionTitle}`,
+            Section_Number: secNum,
+            chapter: { connect: [chapterDocId] },
+          }})
+        });
+        const sData = await sRes.json();
+        if (!sData.data) throw new Error(`Section creation failed: ${JSON.stringify(sData.error)}`);
+        secCache[key] = sData.data.documentId;
+        return sData.data.documentId;
+      };
+
+      // ── DUPLICATE SHLOKA CHECK ────────────────────────────────────────────
+      // Before writing anything, check if any verse numbers already exist
+      // in this book at the same chapter/section position.
+      const duplicates = [];
+      for (const item of finalQueue) {
+        const chNum  = parseInt(item.adhyayTitle) || 1;
+        const secNum = parseInt(item.sectionTitle) || 0;
+        const query  = secNum > 0
+          ? `filters[books][documentId][$eq]=${bookDocId}&filters[section][chapter][Chapter_Number][$eq]=${chNum}&filters[section][Section_Number][$eq]=${secNum}&filters[Verse_Number][$eq]=${item.Verse_Number}`
+          : `filters[books][documentId][$eq]=${bookDocId}&filters[section][chapter][Chapter_Number][$eq]=${chNum}&filters[Verse_Number][$eq]=${item.Verse_Number}`;
+        const dupRes  = await fetch(`${STRAPI_URL}/api/shlokas?${query}&fields[0]=Verse_Number&pagination[limit]=1`, { headers: getAuthHeaders() });
+        const dupData = await dupRes.json();
+        if (dupData.data?.length > 0) {
+          duplicates.push({
+            label: `${item.adhyayTitle}${secNum > 0 ? `.${secNum}` : ''}.${item.Verse_Number}`,
+            verse: item,
+          });
+        }
       }
-      showNotification(`SUCCESS: Sync complete.`);
-      setVersesQueue([]); setFormData({...INITIAL_FORM_STATE}); onNavigate('#/dashboard');
+
+      // If duplicates found — pause and show warning modal, let user decide
+      if (duplicates.length > 0) {
+        setIsSubmitting(false);
+        await new Promise((resolve, reject) => {
+          setDuplicateWarning({
+            duplicates,
+            onSkip: () => {
+              setDuplicateWarning(null);
+              // Remove duplicates from queue and continue with remaining
+              const dupLabels = new Set(duplicates.map(d => d.label));
+              const filtered = finalQueue.filter(item => {
+                const secNum = parseInt(item.sectionTitle) || 0;
+                const label = `${item.adhyayTitle}${secNum > 0 ? `.${secNum}` : ''}.${item.Verse_Number}`;
+                return !dupLabels.has(label);
+              });
+              if (filtered.length === 0) {
+                showNotification('All verses already exist. Nothing to sync.');
+                resolve('abort');
+              } else {
+                resolve({ filtered });
+              }
+            },
+            onOverwrite: () => { setDuplicateWarning(null); resolve({ filtered: finalQueue }); },
+            onCancel:    () => { setDuplicateWarning(null); reject(new Error('Cancelled by user.')); },
+          });
+        }).then(async (result) => {
+          if (result === 'abort') return;
+          setIsSubmitting(true);
+          await submitQueue(result.filtered, bookDocId, findOrCreateChapter, findOrCreateSection);
+          onNavigate('#/dashboard');
+        }).catch((err) => {
+          if (err.message !== 'Cancelled by user.') showNotification(`Error: ${err.message}`);
+        }).finally(() => setIsSubmitting(false));
+        return;
+      }
+
+      await submitQueue(finalQueue, bookDocId, findOrCreateChapter, findOrCreateSection);
+      onNavigate('#/dashboard');
     } catch (err) { showNotification(`Error: ${err.message}`); } finally { setIsSubmitting(false); }
   };
 
@@ -225,6 +324,50 @@ const ShlokaPortalManager = ({ onNavigate }) => {
       {notification && <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[200] bg-indigo-950 text-white px-10 py-5 rounded-[2rem] shadow-2xl flex items-center gap-4 border-2 border-indigo-500/20 backdrop-blur-xl">
         <AlertCircle size={18}/><span>{notification}</span></div>}
       
+      {/* ── DUPLICATE WARNING MODAL ─────────────────────────────────────── */}
+      {duplicateWarning && (
+        <div className="fixed inset-0 z-[400] bg-slate-900/70 backdrop-blur-xl flex items-center justify-center p-8">
+          <div className="bg-white rounded-[3rem] shadow-2xl border border-amber-100 p-12 max-w-lg w-full">
+            <div className="w-16 h-16 bg-amber-50 rounded-2xl flex items-center justify-center mx-auto mb-6">
+              <AlertCircle size={32} className="text-amber-500" />
+            </div>
+            <h3 className="text-2xl font-black text-slate-800 tracking-tighter text-center mb-2">
+              Duplicate Verses Detected
+            </h3>
+            <p className="text-slate-400 text-sm font-medium text-center mb-6">
+              The following verse positions already exist in this book:
+            </p>
+            <div className="bg-amber-50 rounded-2xl p-4 mb-8 flex flex-wrap gap-2 justify-center">
+              {duplicateWarning.duplicates.map((d, i) => (
+                <span key={i} className="bg-white border border-amber-200 text-amber-700 px-3 py-1 rounded-lg text-xs font-black">
+                  {d.label}
+                </span>
+              ))}
+            </div>
+            <div className="space-y-3">
+              <button
+                onClick={duplicateWarning.onSkip}
+                className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-sm hover:bg-indigo-700 transition-all"
+              >
+                Skip Duplicates — Add Only New Verses
+              </button>
+              <button
+                onClick={duplicateWarning.onOverwrite}
+                className="w-full py-4 bg-amber-500 text-white rounded-2xl font-black text-sm hover:bg-amber-600 transition-all"
+              >
+                Overwrite — Replace All (Including Duplicates)
+              </button>
+              <button
+                onClick={duplicateWarning.onCancel}
+                className="w-full py-4 bg-slate-50 text-slate-500 rounded-2xl font-black text-sm hover:bg-slate-100 transition-all"
+              >
+                Cancel — Go Back and Review
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isSubmitting && <div className="fixed inset-0 z-[300] bg-indigo-950/60 backdrop-blur-2xl flex flex-col items-center justify-center text-white p-10 text-center">
         <Loader2 className="w-24 h-24 text-white animate-spin mb-10 opacity-80" /><h2 className="text-6xl font-black tracking-tighter mb-4 text-center">Relational Tree Sync</h2></div>}
 
