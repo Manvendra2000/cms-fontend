@@ -163,27 +163,57 @@ const ShlokaPortalManager = ({ onNavigate }) => {
         });
       }
 
-      const chapCache = {}; const secCache = {}; 
+      const chapCache = {}; const secCache = {};
       for (let i = 0; i < finalQueue.length; i++) {
         const item = finalQueue[i];
+
+        // Strapi 5 requires relations as { connect: [documentId] }, not bare strings.
+        // --- CHAPTER ---
         if (!chapCache[item.adhyayTitle]) {
-            const cRes = await fetch(`${STRAPI_URL}/api/chapters`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ data: { Title: `${formData.hierarchySanskritNames.level1} ${item.adhyayTitle}`, Chapter_Number: parseInt(item.adhyayTitle) || 1, book: bookDocId } }) });
-            const cData = await cRes.json();
-            chapCache[item.adhyayTitle] = cData.data.documentId;
+          const cRes = await fetch(`${STRAPI_URL}/api/chapters`, {
+            method: 'POST', headers: getAuthHeaders(),
+            body: JSON.stringify({ data: {
+              Title: `${formData.hierarchySanskritNames.level1} ${item.adhyayTitle}`,
+              Chapter_Number: parseInt(item.adhyayTitle) || 1,
+              book: { connect: [bookDocId] },
+            }})
+          });
+          const cData = await cRes.json();
+          if (!cData.data) throw new Error(`Chapter creation failed: ${JSON.stringify(cData.error)}`);
+          chapCache[item.adhyayTitle] = cData.data.documentId;
         }
 
+        // --- SECTION ---
         let sDocId = null;
         if (item.sectionTitle && item.sectionTitle !== "" && item.sectionTitle !== "0") {
-            const key = `${item.adhyayTitle}-${item.sectionTitle}`;
-            if (!secCache[key]) {
-                const sRes = await fetch(`${STRAPI_URL}/api/sections`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ data: { Title: `${formData.hierarchySanskritNames.level3} ${item.sectionTitle}`, Section_Number: parseInt(item.sectionTitle) || 1, chapter: chapCache[item.adhyayTitle] } }) });
-                const sData = await sRes.json();
-                if (sData.data) secCache[key] = sData.data.documentId;
-            }
-            sDocId = secCache[key];
+          const key = `${item.adhyayTitle}-${item.sectionTitle}`;
+          if (!secCache[key]) {
+            const sRes = await fetch(`${STRAPI_URL}/api/sections`, {
+              method: 'POST', headers: getAuthHeaders(),
+              body: JSON.stringify({ data: {
+                Title: `${formData.hierarchySanskritNames.level3} ${item.sectionTitle}`,
+                Section_Number: parseInt(item.sectionTitle) || 1,
+                chapter: { connect: [chapCache[item.adhyayTitle]] },
+              }})
+            });
+            const sData = await sRes.json();
+            if (sData.data) secCache[key] = sData.data.documentId;
+          }
+          sDocId = secCache[key];
         }
 
-        await fetch(`${STRAPI_URL}/api/shlokas`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ data: { ...item, books: bookDocId, chapter: chapCache[item.adhyayTitle], section: sDocId } }) });
+        // --- SHLOKA ---
+        // Strip flat title helper fields; pass all relations via connect syntax.
+        const { adhyayTitle, khandaTitle, sectionTitle, ...shlokaFields } = item;
+        await fetch(`${STRAPI_URL}/api/shlokas`, {
+          method: 'POST', headers: getAuthHeaders(),
+          body: JSON.stringify({ data: {
+            ...shlokaFields,
+            books:   { connect: [bookDocId] },
+            chapter: { connect: [chapCache[item.adhyayTitle]] },
+            ...(sDocId ? { section: { connect: [sDocId] } } : {}),
+          }})
+        });
       }
       showNotification(`SUCCESS: Sync complete.`);
       setVersesQueue([]); setFormData({...INITIAL_FORM_STATE}); onNavigate('#/dashboard');
