@@ -35,9 +35,7 @@ const BookManager = ({ onNavigate }) => {
       `${STRAPI_URL}/api/categories?fields[0]=Name&pagination[limit]=100`,
       { headers }
     );
-
     const json = await res.json();
-
     setCategories(
       json.data.map((c) => ({
         id: c.documentId,
@@ -48,14 +46,11 @@ const BookManager = ({ onNavigate }) => {
 
   const loadBooks = async () => {
     setLoading(true);
-
     const res = await fetch(
       `${STRAPI_URL}/api/books?filters[category][Name][$eq]=${selectedCategory}&fields[0]=Title&populate[category][fields][0]=Name`,
       { headers }
     );
-
     const json = await res.json();
-
     setBooks(
       json.data.map((b) => ({
         id: b.documentId,
@@ -63,7 +58,6 @@ const BookManager = ({ onNavigate }) => {
         category: b.category?.Name,
       }))
     );
-
     setLoading(false);
   };
 
@@ -71,26 +65,58 @@ const BookManager = ({ onNavigate }) => {
     setSelectedBook(book);
     setLoading(true);
 
+    // Chapters/sections have no direct book link in Strapi.
+    // The only reliable connection is: shloka.books -> shloka.section -> section.chapter
+    // So we fetch all shlokas for this book and derive the chapter/section tree.
     const res = await fetch(
-      `${STRAPI_URL}/api/chapters?filters[book][documentId][$eq]=${book.id}&fields[0]=Title&fields[1]=Chapter_Number&populate[sections][fields][0]=Title&populate[sections][fields][1]=Section_Number`,
+      `${STRAPI_URL}/api/shlokas` +
+        `?filters[books][documentId][$eq]=${book.id}` +
+        `&fields[0]=Verse_Number` +
+        `&populate[section][fields][0]=Title&populate[section][fields][1]=Section_Number` +
+        `&populate[section][populate][chapter][fields][0]=Title&populate[section][populate][chapter][fields][1]=Chapter_Number` +
+        `&pagination[limit]=1000`,
       { headers }
     );
 
     const json = await res.json();
+    const shlokas = json.data || [];
 
-    setChapters(
-      json.data.map((ch) => ({
-        id: ch.documentId,
-        title: ch.Title,
-        number: ch.Chapter_Number,
-        sections: (ch.sections || []).map((s) => ({
-          id: s.documentId,
-          title: s.Title,
-          number: s.Section_Number,
-        })),
+    // Build chapter -> sections map using shloka relations as ground truth
+    const chapterMap = {};
+    shlokas.forEach((shloka) => {
+      const section = shloka.section;
+      if (!section) return;
+      const chapter = section.chapter;
+      if (!chapter) return;
+
+      const chId = chapter.documentId;
+      const secId = section.documentId;
+
+      if (!chapterMap[chId]) {
+        chapterMap[chId] = {
+          id: chId,
+          title: chapter.Title,
+          number: chapter.Chapter_Number,
+          sections: {},
+        };
+      }
+      if (!chapterMap[chId].sections[secId]) {
+        chapterMap[chId].sections[secId] = {
+          id: secId,
+          title: section.Title,
+          number: section.Section_Number,
+        };
+      }
+    });
+
+    const chapterList = Object.values(chapterMap)
+      .map((ch) => ({
+        ...ch,
+        sections: Object.values(ch.sections).sort((a, b) => a.number - b.number),
       }))
-    );
+      .sort((a, b) => a.number - b.number);
 
+    setChapters(chapterList);
     setLoading(false);
   };
 
@@ -106,11 +132,9 @@ const BookManager = ({ onNavigate }) => {
           >
             <ArrowLeft size={18} />
           </button>
-
           <span className="bg-orange-100 text-orange-600 w-9 h-9 flex items-center justify-center rounded-lg">
             ॐ
           </span>
-
           <h1 className="font-bold text-lg">Book Manager</h1>
         </div>
       </header>
@@ -120,9 +144,7 @@ const BookManager = ({ onNavigate }) => {
         {/* CATEGORY SELECT */}
         {!selectedBook && (
           <div className="bg-white p-6 rounded-xl border mb-6">
-
             <h2 className="font-bold mb-4">Categories</h2>
-
             <div className="grid grid-cols-4 gap-3">
               {categories.map((c) => (
                 <button
@@ -144,11 +166,7 @@ const BookManager = ({ onNavigate }) => {
         {/* BOOK LIST */}
         {!selectedBook && selectedCategory && (
           <div className="bg-white p-6 rounded-xl border">
-
-            <h2 className="font-bold mb-4">
-              Books in {selectedCategory}
-            </h2>
-
+            <h2 className="font-bold mb-4">Books in {selectedCategory}</h2>
             {loading ? (
               <Loader2 className="animate-spin" />
             ) : (
@@ -162,7 +180,6 @@ const BookManager = ({ onNavigate }) => {
                     <BookOpen size={18} className="text-indigo-600" />
                     {book.title}
                   </div>
-
                   <ChevronRight size={16} />
                 </div>
               ))
@@ -173,10 +190,8 @@ const BookManager = ({ onNavigate }) => {
         {/* BOOK STRUCTURE */}
         {selectedBook && (
           <div className="bg-white p-6 rounded-xl border">
-
             <div className="flex justify-between mb-4">
               <h2 className="font-bold">{selectedBook.title}</h2>
-
               <button
                 onClick={() => {
                   setSelectedBook(null);
@@ -190,19 +205,20 @@ const BookManager = ({ onNavigate }) => {
 
             {loading ? (
               <Loader2 className="animate-spin" />
+            ) : chapters.length === 0 ? (
+              <p className="text-slate-400 text-sm text-center py-8">
+                No shlokas found for this book.
+              </p>
             ) : (
               chapters.map((chapter) => (
                 <div key={chapter.id} className="border rounded mb-3">
 
-                  {/* CHAPTER */}
+                  {/* CHAPTER ROW */}
                   <div
                     onClick={() => toggle(chapter.id)}
                     className="p-3 bg-slate-50 cursor-pointer flex justify-between"
                   >
-                    <span>
-                      Chapter {chapter.number}: {chapter.title}
-                    </span>
-
+                    <span>Chapter {chapter.number}: {chapter.title}</span>
                     <ChevronRight
                       className={expanded[chapter.id] ? "rotate-90" : ""}
                       size={16}
@@ -219,13 +235,11 @@ const BookManager = ({ onNavigate }) => {
 
                       {chapter.sections.map((section) => (
                         <div key={section.id} className="ml-4 border rounded">
-
                           <div
                             onClick={() => toggle(section.id)}
                             className="p-2 bg-slate-50 flex justify-between cursor-pointer"
                           >
                             Section {section.number}: {section.title}
-
                             <ChevronRight
                               className={expanded[section.id] ? "rotate-90" : ""}
                               size={14}
