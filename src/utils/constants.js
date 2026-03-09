@@ -6,7 +6,7 @@ export const INITIAL_FORM_STATE = {
   shankaracharyaIntroTranslation: '', bhashya: '',
   selectedTeekas: [''], hierarchyCount: 2,
   hierarchySanskritNames: { level1: 'अध्याय', level2: 'श्लोक', level3: 'प्रकरण', level4: 'पद' },
-  hierarchyValues: { level1: '1', level2: '1', level3: '1', level4: '1' },
+  hierarchyValues: { level1: '1', level2: '1', level3: '1', level4: '' },
   sourceText: '', verseTranslations: { english: '', others: [] },
   bhashyaContent: { sanskrit: '', english: '', others: [] },
   teekas: []

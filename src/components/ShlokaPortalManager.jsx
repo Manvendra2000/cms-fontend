@@ -48,26 +48,29 @@ const ShlokaPortalManager = ({ onNavigate }) => {
         const res = await fetch(`${STRAPI_URL}/api/books?filters[Title][$eq]=${formData.book}&fields[0]=description&fields[1]=shankaracharyaIntro&fields[2]=shankaracharyaIntroTranslation&populate[category][fields][0]=Name`, { headers: getAuthHeaders() });
         const data = await res.json();
         const book = data.data?.[0];
-        if (book) {
-          if (book.category?.Name) updateData('category', book.category.Name);
+        if (book?.category?.documentId) {
+          // Store the ID, not the Name
+          updateData('category', book.category.documentId); 
         }
       } catch (err) { console.error("Failed to fetch existing book data:", err); }
     };
     fetchExistingBookIntro();
   }, [formData.book]);
 
-  const handleAddNewCategory = async (newName) => {
-    const res = await fetch(`${STRAPI_URL}/api/categories`, { 
-      method: 'POST', 
-      headers: getAuthHeaders(), 
-      body: JSON.stringify({ data: { Name: newName } }) 
-    });
-    if (res.ok) { 
-      await fetchDropdownData(); 
-      updateData('category', newName); 
-      showNotification(`Category "${newName}" added.`); 
-    }
-  };
+const handleAddNewCategory = async (newName) => {
+  const res = await fetch(`${STRAPI_URL}/api/categories`, { 
+    method: 'POST', 
+    headers: getAuthHeaders(), 
+    body: JSON.stringify({ data: { Name: newName } }) 
+  });
+  const json = await res.json();
+  if (res.ok && json.data) { 
+    await fetchDropdownData(); 
+    // Store the documentId returned by the server
+    updateData('category', json.data.documentId); 
+    showNotification(`Category "${newName}" added.`); 
+  }
+};
 
   const showNotification = (msg) => { setNotification(msg); setTimeout(() => setNotification(null), 6000); };
   const updateData = (field, value) => setFormData(prev => ({ ...prev, [field]: value }));
@@ -99,6 +102,12 @@ const ShlokaPortalManager = ({ onNavigate }) => {
         tika: formData.teekas.map(t => ({ authorTitle: t.author, content: toStrapiBlocks(t.text), translation: toStrapiBlocks(t.englishTranslation) }))
       }]
     };
+    
+    console.log('🔍 Snapshot Debug:', {
+      snapshot,
+      sourceTextLength: formData.sourceText.length,
+      hierarchyValues: formData.hierarchyValues
+    });
     setVersesQueue([...versesQueue, snapshot]);
     const nextValues = { ...formData.hierarchyValues };
     const lastLvlKey = `level${formData.hierarchyCount}`;
@@ -131,6 +140,53 @@ const ShlokaPortalManager = ({ onNavigate }) => {
     setFormData({...INITIAL_FORM_STATE});
   };
 
+  // Separate function to handle category linking after book creation
+  const linkBookToCategory = async (bookDocId, categoryDocumentId) => {
+    if (!bookDocId || !categoryDocumentId) {
+      console.log('⚠️ Skipping category linking - missing book or category ID');
+      return;
+    }
+
+    try {
+      console.log('🔗 Linking book to category:', { bookDocId, categoryDocumentId });
+      
+      // Get the category to find its numeric ID
+      const categoryRes = await fetch(`${STRAPI_URL}/api/categories/${categoryDocumentId}`, {
+        headers: getAuthHeaders()
+      });
+      const categoryData = await categoryRes.json();
+      
+      if (!categoryData.data) {
+        console.error('❌ Category not found:', categoryDocumentId);
+        return;
+      }
+      
+      const categoryId = categoryData.data.id;
+      console.log('📋 Found category ID:', categoryId);
+
+      // Update the book with the category relation
+      const updateRes = await fetch(`${STRAPI_URL}/api/books/${bookDocId}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          data: {
+            category: categoryId
+          }
+        })
+      });
+
+      if (updateRes.ok) {
+        const updateData = await updateRes.json();
+        console.log('✅ Book successfully linked to category:', updateData);
+        showNotification('Book linked to category successfully!');
+      } else {
+        console.error('❌ Failed to link book to category:', await updateRes.text());
+      }
+    } catch (error) {
+      console.error('❌ Error linking book to category:', error);
+    }
+  };
+
   const handleFinishAndSubmit = async () => {
     let finalQueue = [...versesQueue];
     if (formData.sourceText.trim()) {
@@ -147,44 +203,72 @@ const ShlokaPortalManager = ({ onNavigate }) => {
          }]
        });
     }
+    console.log('🚀 Starting book submission with:', {
+      book: formData.book,
+      category: formData.category,
+      
+      bookIntro: formData.bookIntro,
+      hierarchyCount: formData.hierarchyCount,
+      allFormData: formData
+    });
+    
     if (finalQueue.length === 0) return showNotification("No content.");
     setIsSubmitting(true);
     try {
-      const bookLookup = await fetch(`${STRAPI_URL}/api/books?filters[Title][$eq]=${formData.book}`, { headers: getAuthHeaders() });
+      const bookLookup = await fetch(`${STRAPI_URL}/api/books?filters[Title][$eq]=${encodeURIComponent(formData.book)}`, { headers: getAuthHeaders() });
       const bLookupData = await bookLookup.json();
       let bookDocId = bLookupData.data?.[0]?.documentId;
 
-      const selectedCategory = categoriesList.find(c => c.name === formData.category);
-      const categoryId = selectedCategory?.id || null;
+      console.log('🚀 Starting book submission with:', {
+        book: formData.book,
+        bookIntro: formData.bookIntro,
+        hierarchyCount: formData.hierarchyCount,
+        allFormData: formData
+      });
+      
+      console.log('🔍 Hierarchy Debug:', {
+        hierarchyValues: formData.hierarchyValues,
+        hierarchyCount: formData.hierarchyCount,
+        level1: formData.hierarchyValues.level1,
+        level2: formData.hierarchyValues.level2,
+        level3: formData.hierarchyValues.level3,
+        level4: formData.hierarchyValues.level4
+      });
 
       if (!bookDocId) {
+        const requestBody = { 
+          data: { 
+            Title: formData.book, 
+            description: toStrapiBlocks(formData.bookIntro),
+            shankaracharyaIntro: formData.shankaracharyaIntro,
+            shankaracharyaIntroTranslation: formData.shankaracharyaIntroTranslation
+          } 
+        };
+        
+        console.log('🚀 Creating new book with request body:', requestBody);
+        
         const bRes = await fetch(`${STRAPI_URL}/api/books`, { 
           method: 'POST', 
           headers: getAuthHeaders(), 
-          body: JSON.stringify({ 
-            data: { 
-              Title: formData.book, 
-              description: toStrapiBlocks(formData.bookIntro),
-              shankaracharyaIntro: formData.shankaracharyaIntro,
-              shankaracharyaIntroTranslation: formData.shankaracharyaIntroTranslation,
-              category: categoryId
-            } 
-          }) 
+          body: JSON.stringify(requestBody)
         });
         const bData = await bRes.json();
         bookDocId = bData.data.documentId;
       } else {
+        const updateBody = { 
+          data: { 
+            description: toStrapiBlocks(formData.bookIntro),
+            shankaracharyaIntro: formData.shankaracharyaIntro,
+            shankaracharyaIntroTranslation: formData.shankaracharyaIntroTranslation
+          } 
+        };
+        
+        console.log('🚀 Updating existing book with:', updateBody);
+        
         await fetch(`${STRAPI_URL}/api/books/${bookDocId}`, {
           method: 'PUT',
           headers: getAuthHeaders(),
-          body: JSON.stringify({ 
-            data: { 
-              description: toStrapiBlocks(formData.bookIntro),
-              shankaracharyaIntro: formData.shankaracharyaIntro,
-              shankaracharyaIntroTranslation: formData.shankaracharyaIntroTranslation,
-              category: categoryId
-            } 
-          })
+          body: JSON.stringify(updateBody)
         });
       }
 
@@ -315,6 +399,12 @@ const ShlokaPortalManager = ({ onNavigate }) => {
       }
 
       await submitQueue(finalQueue, bookDocId, findOrCreateChapter, findOrCreateSection);
+      
+      // Link book to category after all shlokas are created
+      if (formData.category) {
+        await linkBookToCategory(bookDocId, formData.category);
+      }
+      
       onNavigate('#/dashboard');
     } catch (err) { showNotification(`Error: ${err.message}`); } finally { setIsSubmitting(false); }
   };
