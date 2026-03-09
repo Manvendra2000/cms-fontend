@@ -425,30 +425,13 @@ export default function ShlokaList({ sectionId, token, role }) {
     setLoading(true);
     setError(null);
     try {
-      // Try both documentId and id filters to ensure we catch all shlokas
-      const urls = [
-        `${API_URL}/api/shlokas?filters[section][documentId][$eq]=${sectionId}&populate[books][populate]=*&populate[chapter][populate]=*&populate[section][populate]=*&populate[Commentry][populate]=*&sort=Verse_Number:asc`,
-        `${API_URL}/api/shlokas?filters[section][id][$eq]=${sectionId}&populate[books][populate]=*&populate[chapter][populate]=*&populate[section][populate]=*&populate[Commentry][populate]=*&sort=Verse_Number:asc`
-      ];
-      
-      let allShlokas = [];
-      
-      for (const url of urls) {
-        const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-        if (!res.ok) continue;
-        const result = await res.json();
-        if (result.data && result.data.length > 0) {
-          allShlokas = [...allShlokas, ...result.data];
-        }
-      }
-      
-      // Remove duplicates based on documentId or id
-      const uniqueShlokas = allShlokas.filter((shloka, index, self) => {
-        const shlokaId = shloka.documentId || shloka.id;
-        return index === self.findIndex(s => (s.documentId || s.id) === shlokaId);
-      });
-      
-      setShlokas(uniqueShlokas);
+      const isNumericId = /^\d+$/.test(String(sectionId));
+      const filterKey   = isNumericId ? "filters[section][id][$eq]" : "filters[section][documentId][$eq]";
+      const url = `${API_URL}/api/shlokas?${filterKey}=${sectionId}&populate[books][populate]=*&populate[chapter][populate]=*&populate[section][populate]=*&populate[Commentry][populate]=*&sort=Verse_Number:asc`;
+      const res = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const result = await res.json();
+      setShlokas(result.data || []);
     } catch (err) {
       setError(err.message);
     } finally {
