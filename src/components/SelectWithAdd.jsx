@@ -17,8 +17,21 @@ const SelectWithAdd = ({ label, options, value, onChange, onAdd, placeholder = "
       ) : (
         <select className="p-3 border-2 border-slate-100 rounded-xl bg-white disabled:bg-slate-50 text-sm outline-none focus:border-indigo-500 transition-all font-bold text-slate-700" value={value} disabled={disabled} onChange={(e) => e.target.value === '__ADD_NEW__' ? setIsAdding(true) : onChange(e.target.value)}>
           <option value="" disabled>{placeholder}</option>
-          {options.map(opt => <option key={opt.id || opt.name || opt} value={opt.name || opt}>{opt.name || opt}</option>)}
-          <option value="__ADD_NEW__" className="text-indigo-600 font-black">+ Create New Entry</option>
+{options.map(opt => {
+  const label = typeof opt === "object"
+    ? opt.name || opt.Name || opt.title || ""
+    : opt;
+
+  const value = typeof opt === "object"
+    ? opt.id || opt.name || opt.Name
+    : opt;
+
+  return (
+    <option key={value} value={value}>
+      {label}
+    </option>
+  );
+})}          <option value="__ADD_NEW__" className="text-indigo-600 font-black">+ Create New Entry</option>
         </select>
       )}
     </div>
