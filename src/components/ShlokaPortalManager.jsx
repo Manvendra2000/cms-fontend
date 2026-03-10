@@ -76,6 +76,12 @@ const handleAddNewCategory = async (newName) => {
   const updateData = (field, value) => setFormData(prev => ({ ...prev, [field]: value }));
   const updateNested = (parent, field, value) => setFormData(prev => ({ ...prev, [parent]: { ...prev[parent], [field]: value } }));
 
+  const resolveAuthorName = (idOrName) => {
+    if (!idOrName) return '';
+    const found = authorsList.find(a => a.id === idOrName);
+    return found ? found.name : idOrName;
+  };
+
   const handleAddNewBook = async (newTitle) => {
     const res = await fetch(`${STRAPI_URL}/api/books`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ data: { Title: newTitle } }) });
     if (res.ok) { await fetchDropdownData(); updateData('book', newTitle); showNotification(`Volume "${newTitle}" added.`); }
@@ -83,7 +89,8 @@ const handleAddNewCategory = async (newName) => {
 
   const handleAddNewAuthor = async (newName, field) => {
     const res = await fetch(`${STRAPI_URL}/api/authors`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ data: { name: newName } }) });
-    if (res.ok) { await fetchDropdownData(); if (field === 'bhashya') updateData('bhashya', newName); showNotification(`Author "${newName}" added.`); }
+    const json = await res.json();
+    if (res.ok && json.data) { await fetchDropdownData(); if (field === 'bhashya') updateData('bhashya', json.data.documentId); showNotification(`Author "${newName}" added.`); }
   };
 
   const handleSaveAndNext = () => {
@@ -96,10 +103,10 @@ const handleAddNewCategory = async (newName) => {
       khandaTitle: String(formData.hierarchyValues.level2 || ""),
       sectionTitle: String(formData.hierarchyValues.level3 || ""),
       Commentry: [{
-        authorTitle: formData.bhashya || "Principal Bhashya",
+        authorTitle: resolveAuthorName(formData.bhashya) || "Principal Bhashya",
         content: toStrapiBlocks(formData.bhashyaContent.sanskrit),
         translation: toStrapiBlocks(formData.bhashyaContent.english),
-        tika: formData.teekas.map(t => ({ authorTitle: t.author, content: toStrapiBlocks(t.text), translation: toStrapiBlocks(t.englishTranslation) }))
+        tika: formData.teekas.map(t => ({ authorTitle: resolveAuthorName(t.author), content: toStrapiBlocks(t.text), translation: toStrapiBlocks(t.englishTranslation) }))
       }]
     };
     
@@ -143,53 +150,6 @@ const handleAddNewCategory = async (newName) => {
     setFormData({...INITIAL_FORM_STATE});
   };
 
-  // Separate function to handle category linking after book creation
-  const linkBookToCategory = async (bookDocId, categoryDocumentId) => {
-    if (!bookDocId || !categoryDocumentId) {
-      console.log('⚠️ Skipping category linking - missing book or category ID');
-      return;
-    }
-
-    try {
-      console.log('🔗 Linking book to category:', { bookDocId, categoryDocumentId });
-      
-      // Get the category to find its numeric ID
-      const categoryRes = await fetch(`${STRAPI_URL}/api/categories/${categoryDocumentId}`, {
-        headers: getAuthHeaders()
-      });
-      const categoryData = await categoryRes.json();
-      
-      if (!categoryData.data) {
-        console.error('❌ Category not found:', categoryDocumentId);
-        return;
-      }
-      
-      const categoryId = categoryData.data.id;
-      console.log('📋 Found category ID:', categoryId);
-
-      // Update the book with the category relation
-      const updateRes = await fetch(`${STRAPI_URL}/api/books/${bookDocId}`, {
-        method: 'PUT',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          data: {
-            category: categoryId
-          }
-        })
-      });
-
-      if (updateRes.ok) {
-        const updateData = await updateRes.json();
-        console.log('✅ Book successfully linked to category:', updateData);
-        showNotification('Book linked to category successfully!');
-      } else {
-        console.error('❌ Failed to link book to category:', await updateRes.text());
-      }
-    } catch (error) {
-      console.error('❌ Error linking book to category:', error);
-    }
-  };
-
   const handleFinishAndSubmit = async () => {
     let finalQueue = [...versesQueue];
     if (formData.sourceText.trim()) {
@@ -201,8 +161,8 @@ const handleAddNewCategory = async (newName) => {
          khandaTitle: String(formData.hierarchyValues.level2 || ""),
          sectionTitle: String(formData.hierarchyValues.level3 || ""),
          Commentry: [{ 
-           authorTitle: formData.bhashya, content: toStrapiBlocks(formData.bhashyaContent.sanskrit), translation: toStrapiBlocks(formData.bhashyaContent.english), 
-           tika: formData.teekas.map(t => ({ authorTitle: t.author, content: toStrapiBlocks(t.text), translation: toStrapiBlocks(t.englishTranslation) })) 
+           authorTitle: resolveAuthorName(formData.bhashya) || "Principal Bhashya", content: toStrapiBlocks(formData.bhashyaContent.sanskrit), translation: toStrapiBlocks(formData.bhashyaContent.english), 
+           tika: formData.teekas.map(t => ({ authorTitle: resolveAuthorName(t.author), content: toStrapiBlocks(t.text), translation: toStrapiBlocks(t.englishTranslation) })) 
          }]
        });
     }
@@ -244,7 +204,8 @@ const handleAddNewCategory = async (newName) => {
             Title: formData.book, 
             description: toStrapiBlocks(formData.bookIntro),
             shankaracharyaIntro: formData.shankaracharyaIntro,
-            shankaracharyaIntroTranslation: formData.shankaracharyaIntroTranslation
+            shankaracharyaIntroTranslation: formData.shankaracharyaIntroTranslation,
+            ...(formData.category ? { category: { connect: [formData.category] } } : {})
           } 
         };
         
@@ -262,7 +223,8 @@ const handleAddNewCategory = async (newName) => {
           data: { 
             description: toStrapiBlocks(formData.bookIntro),
             shankaracharyaIntro: formData.shankaracharyaIntro,
-            shankaracharyaIntroTranslation: formData.shankaracharyaIntroTranslation
+            shankaracharyaIntroTranslation: formData.shankaracharyaIntroTranslation,
+            ...(formData.category ? { category: { connect: [formData.category] } } : {})
           } 
         };
         
@@ -402,12 +364,6 @@ const handleAddNewCategory = async (newName) => {
       }
 
       await submitQueue(finalQueue, bookDocId, findOrCreateChapter, findOrCreateSection);
-      
-      // Link book to category after all shlokas are created
-      if (formData.category) {
-        await linkBookToCategory(bookDocId, formData.category);
-      }
-      
       onNavigate('#/dashboard');
     } catch (err) { showNotification(`Error: ${err.message}`); } finally { setIsSubmitting(false); }
   };
