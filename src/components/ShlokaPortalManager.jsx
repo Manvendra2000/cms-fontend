@@ -33,7 +33,7 @@ const ShlokaPortalManager = ({ onNavigate }) => {
       const authorsData = await authorsRes.json();
       const categoriesData = await categoriesRes.json();
       
-      if (booksData.data) setBooksList(booksData.data.map(b => ({ id: b.documentId, name: b.Title })));
+      if (booksData.data) setBooksList(booksData.data.map(b => ({ id: b.Title, name: b.Title })));
       if (authorsData.data) setAuthorsList(authorsData.data.map(a => ({ id: a.documentId, name: a.name })));
       if (categoriesData.data) setCategoriesList(categoriesData.data.map(c => ({ id: c.documentId, name: c.Name })));
     } catch (err) { console.error(err); }
@@ -129,6 +129,9 @@ const handleAddNewCategory = async (newName) => {
         method: 'POST', headers: getAuthHeaders(),
         body: JSON.stringify({ data: {
           ...shlokaFields,
+          adhyayTitle,
+          khandaTitle,
+          sectionTitle,
           books:   { connect: [bookDocId] },
           chapter: { connect: [chapterDocId] },
           ...(sDocId ? { section: { connect: [sDocId] } } : {}),
